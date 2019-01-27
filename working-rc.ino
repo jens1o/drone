@@ -1,0 +1,135 @@
+int ch1; // Here's where we'll keep our channel values
+int ch2;
+int ch3;
+int ch4;
+
+#define PERCENT_TOP 100
+#define PERCENT_LOW 0
+#define PULSE_IN_TIMEOUT 25000
+
+struct ValueSet {
+   unsigned char thrust;
+   unsigned char movement_f_b;
+   unsigned char movement_l_r;
+   unsigned char rotation_l_r;
+};
+
+void setup() {
+  // Set input pins
+  pinMode(5, INPUT);
+  pinMode(6, INPUT);
+  pinMode(7, INPUT);
+  pinMode(8, INPUT);
+
+  // Connect to computer for outputting debug information
+  Serial.begin(9600);
+}
+
+int round_up_to_next_10(int to_round) {
+  if (to_round % 10 == 0) return to_round;
+  return (10 - to_round % 10) + to_round;
+}
+
+int round_down_to_next_10(int to_round) {
+  return to_round - to_round % 10;
+}
+
+unsigned long read_value(int channel_id) {
+  return pulseIn(channel_id, HIGH, PULSE_IN_TIMEOUT);
+}
+
+unsigned char get_thrust_in_percent(unsigned long raw_value) {
+  unsigned long mapped_value = map(raw_value, 967, 1759, PERCENT_LOW, PERCENT_TOP);
+  unsigned char rounded_value = round_up_to_next_10(mapped_value);
+
+  if (rounded_value > 100) {
+    return 100;
+  } else {
+    return rounded_value;
+  }
+}
+
+// This function extracts the value like this:
+// 0% -> backwards
+// 50% -> steady
+// 100% -> forwards
+unsigned long get_movement_forward_backward_in_percent(unsigned long raw_value) {
+  unsigned long mapped_value = map(raw_value, 1109, 1880, PERCENT_LOW, PERCENT_TOP);
+  unsigned int rounded_value = round_up_to_next_10(mapped_value);
+
+  if (rounded_value > 100) {
+    return 100;
+  } else {
+    return rounded_value;
+  }
+}
+
+// This function extracts the value like this:
+// 0% -> left
+// 50% -> steady
+// 100% -> right
+unsigned int get_movement_left_right_in_percent(unsigned long raw_value) {
+  unsigned int mapped_value = map(raw_value, 1243, 2011, PERCENT_LOW, PERCENT_TOP);
+  unsigned int rounded_value = round_up_to_next_10(mapped_value);
+
+  if (rounded_value > 100) {
+    return 100;
+  } else {
+    return rounded_value;
+  }
+}
+
+// This function extracts the value like this:
+// 0% -> left
+// 50% -> steady
+// 100% -> right
+unsigned long get_rotation_left_right_in_percent(unsigned long raw_value) {
+  unsigned long mapped_value = map(raw_value, 1130, 1885, PERCENT_LOW, PERCENT_TOP);
+  unsigned int rounded_value = round_up_to_next_10(mapped_value);
+
+  if (rounded_value > 100) {
+    return 100;
+  } else {
+    return rounded_value;
+  }
+}
+
+void loop() {
+  // horizontal (left/right)
+  ch1 = read_value(5);
+  // horizontal movement (forward/backward)
+  ch2 = read_value(8);
+  // horizontal rotation (thrust -> up/down)
+  ch3 = read_value(7);
+  // rotation own axis
+  ch4 = read_value(6);
+
+  ValueSet values = {
+    get_thrust_in_percent(ch3),
+    get_movement_forward_backward_in_percent(ch2),
+    get_movement_left_right_in_percent(ch1),
+    get_rotation_left_right_in_percent(ch4)
+  };
+
+  Serial.print("Current thrust: ");
+  Serial.print(values.thrust);
+  Serial.println("%");
+  Serial.print("Current movement (forward/backward): ");
+  Serial.print(values.movement_f_b);
+  Serial.println("%");
+
+  Serial.print("Current left/right value: ");
+  Serial.print(values.movement_l_r);
+  Serial.println("%");
+
+  Serial.print("Current rotation value: ");
+  Serial.print(ch4);
+  Serial.print(" ");
+  Serial.print(values.rotation_l_r);
+  Serial.println("%");
+
+  Serial.println(); // make some room for the next output season
+
+  delay(1000);// I put this here just to make the terminal
+  // window happier
+}
