@@ -125,6 +125,5 @@ void loop() {
 
   Serial.println(); // make some room for the next output season
 
-  delay(1000);// I put this here just to make the terminal
-  // window happier
+  delay(1000);
 }
