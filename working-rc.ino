@@ -1,8 +1,3 @@
-int ch1; // Here's where we'll keep our channel values
-int ch2;
-int ch3;
-int ch4;
-
 #define PERCENT_TOP 100
 #define PERCENT_LOW 0
 #define PULSE_IN_TIMEOUT 25000
@@ -96,13 +91,13 @@ unsigned long get_rotation_left_right_in_percent(unsigned long raw_value) {
 
 void loop() {
   // horizontal (left/right)
-  ch1 = read_value(5);
+  int ch1 = read_value(5);
   // horizontal movement (forward/backward)
-  ch2 = read_value(8);
+  int ch2 = read_value(8);
   // horizontal rotation (thrust -> up/down)
-  ch3 = read_value(7);
+  int ch3 = read_value(7);
   // rotation own axis
-  ch4 = read_value(6);
+  int ch4 = read_value(6);
 
   ValueSet values = {
     get_thrust_in_percent(ch3),
