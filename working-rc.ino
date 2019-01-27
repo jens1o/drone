@@ -37,11 +37,7 @@ unsigned char get_thrust_in_percent(unsigned long raw_value) {
   unsigned long mapped_value = map(raw_value, 967, 1759, PERCENT_LOW, PERCENT_TOP);
   unsigned char rounded_value = round_up_to_next_10(mapped_value);
 
-  if (rounded_value > 100) {
-    return 100;
-  } else {
-    return rounded_value;
-  }
+  return min(rounded_value, 100);
 }
 
 // This function extracts the value like this:
@@ -52,11 +48,7 @@ unsigned long get_movement_forward_backward_in_percent(unsigned long raw_value) 
   unsigned long mapped_value = map(raw_value, 1109, 1880, PERCENT_LOW, PERCENT_TOP);
   unsigned int rounded_value = round_up_to_next_10(mapped_value);
 
-  if (rounded_value > 100) {
-    return 100;
-  } else {
-    return rounded_value;
-  }
+  return min(rounded_value, 100);
 }
 
 // This function extracts the value like this:
@@ -67,11 +59,7 @@ unsigned int get_movement_left_right_in_percent(unsigned long raw_value) {
   unsigned int mapped_value = map(raw_value, 1243, 2011, PERCENT_LOW, PERCENT_TOP);
   unsigned int rounded_value = round_up_to_next_10(mapped_value);
 
-  if (rounded_value > 100) {
-    return 100;
-  } else {
-    return rounded_value;
-  }
+  return min(rounded_value, 100);
 }
 
 // This function extracts the value like this:
@@ -82,11 +70,7 @@ unsigned long get_rotation_left_right_in_percent(unsigned long raw_value) {
   unsigned long mapped_value = map(raw_value, 1130, 1885, PERCENT_LOW, PERCENT_TOP);
   unsigned int rounded_value = round_up_to_next_10(mapped_value);
 
-  if (rounded_value > 100) {
-    return 100;
-  } else {
-    return rounded_value;
-  }
+  return min(rounded_value, 100);
 }
 
 void loop() {
