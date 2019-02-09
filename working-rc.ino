@@ -34,7 +34,7 @@ unsigned long read_value(int channel_id) {
 }
 
 unsigned char get_thrust_in_percent(unsigned long raw_value) {
-  unsigned long mapped_value = map(raw_value, 967, 1759, PERCENT_LOW, PERCENT_TOP);
+  unsigned long mapped_value = map(raw_value, 1098, 1874, PERCENT_LOW, PERCENT_TOP);
   unsigned char rounded_value = round_up_to_next_10(mapped_value);
 
   return min(rounded_value, 100);
@@ -45,7 +45,7 @@ unsigned char get_thrust_in_percent(unsigned long raw_value) {
 // 50% -> steady
 // 100% -> forwards
 unsigned long get_movement_forward_backward_in_percent(unsigned long raw_value) {
-  unsigned long mapped_value = map(raw_value, 1109, 1880, PERCENT_LOW, PERCENT_TOP);
+  unsigned long mapped_value = map(raw_value, 1132, 1914, PERCENT_LOW, PERCENT_TOP);
   unsigned int rounded_value = round_up_to_next_10(mapped_value);
 
   return min(rounded_value, 100);
@@ -56,7 +56,7 @@ unsigned long get_movement_forward_backward_in_percent(unsigned long raw_value) 
 // 50% -> steady
 // 100% -> right
 unsigned int get_movement_left_right_in_percent(unsigned long raw_value) {
-  unsigned int mapped_value = map(raw_value, 1243, 2011, PERCENT_LOW, PERCENT_TOP);
+  unsigned int mapped_value = map(raw_value, 1128, 1887, PERCENT_LOW, PERCENT_TOP);
   unsigned int rounded_value = round_up_to_next_10(mapped_value);
 
   return min(rounded_value, 100);
@@ -67,7 +67,7 @@ unsigned int get_movement_left_right_in_percent(unsigned long raw_value) {
 // 50% -> steady
 // 100% -> right
 unsigned long get_rotation_left_right_in_percent(unsigned long raw_value) {
-  unsigned long mapped_value = map(raw_value, 987, 1744, PERCENT_LOW, PERCENT_TOP);
+  unsigned long mapped_value = map(raw_value, 1105, 1867, PERCENT_LOW, PERCENT_TOP);
   unsigned int rounded_value = round_up_to_next_10(mapped_value);
 
   return min(rounded_value, 100);
@@ -92,7 +92,9 @@ void loop() {
 
   Serial.print("Current thrust: ");
   Serial.print(values.thrust);
-  Serial.println("%");
+  Serial.print("% (");
+  Serial.print(ch3);
+  Serial.println(")");
 
   Serial.print("Current rotation value: ");
   Serial.print(values.rotation_l_r);
@@ -102,13 +104,15 @@ void loop() {
 
   Serial.print("Current left/right value: ");
   Serial.print(values.movement_l_r);
-  Serial.println("%");
+  Serial.print("% (");
+  Serial.print(ch1);
+  Serial.println(")");
 
   Serial.print("Current movement (forward/backward): ");
   Serial.print(values.movement_f_b);
-  Serial.println("%");
-
-
+  Serial.print("% (");
+  Serial.print(ch2);
+  Serial.println(")");
 
   Serial.println(); // make some room for the next output season
 
