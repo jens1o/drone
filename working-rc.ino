@@ -7,16 +7,18 @@
 #define PERCENT_LOW 0
 #define PULSE_IN_TIMEOUT 25000
 // time a tick should roughly take.
-#define ROUGH_TICK_TIME 1000
+#define ROUGH_TICK_TIME 225
 
 
 
 #define SERVO_1_PORT 2
 
-#define MIN_ARM_STRENGTH 50 // (60)
+#define MIN_ARM_STRENGTH 55 // (60)
 #define MAX_ARM_STRENGTH 100
 
 unsigned long START_TIME;
+
+int LAST_THRUST_VALUE = 0;
 
 Servo servo_1;
 
@@ -60,10 +62,10 @@ unsigned long read_value(int channel_id) {
 }
 
 unsigned char get_thrust_in_percent(unsigned long raw_value) {
-  unsigned long mapped_value = map(raw_value, 1098, 1874, PERCENT_LOW, PERCENT_TOP);
-  unsigned char rounded_value = round_up_to_next_10(mapped_value);
+  unsigned long mapped_value = map(raw_value, 1060, 1874, PERCENT_LOW, PERCENT_TOP);
+  //unsigned char rounded_value = round_up_to_next_10(mapped_value);
 
-  return min(rounded_value, 100);
+  return min(mapped_value, 100);
 }
 
 // This function extracts the value like this:
@@ -116,6 +118,10 @@ void log_values(unsigned long value, String name, unsigned long raw_value) {
   }
 }
 
+int calculate_thrust(unsigned long raw_value) {
+  return map(raw_value, 0, 100, MIN_ARM_STRENGTH, MAX_ARM_STRENGTH);
+}
+
 void loop() {
   unsigned long tick_start_time = millis();
 
@@ -127,7 +133,7 @@ void loop() {
   int ch3 = read_value(7);
   // rotation own axis
   int ch4 = read_value(6);
- 
+
   ValueSet values = {
     get_thrust_in_percent(ch3),
     get_movement_forward_backward_in_percent(ch2),
@@ -137,11 +143,15 @@ void loop() {
 
   log_values(values.thrust, "Thrust", ch3);
 
-  Serial.print("Experimental map: ");
-  int thrust_value = map(values.thrust, 0, 100, MIN_ARM_STRENGTH, MAX_ARM_STRENGTH);
-  Serial.println(thrust_value);
+  int new_thrust = calculate_thrust(values.thrust);
 
-  servo_1.write(thrust_value);
+  if (new_thrust != LAST_THRUST_VALUE) {
+    Serial.print("New thrust value: ");
+    Serial.println(new_thrust);
+    LAST_THRUST_VALUE = new_thrust;
+    servo_1.write(LAST_THRUST_VALUE);
+  }
+
 
   log_values(values.rotation_l_r, "Rotation (left/right)", ch4);
 
