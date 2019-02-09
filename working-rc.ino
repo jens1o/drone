@@ -1,6 +1,24 @@
+#include<Servo.h>
+
+// Defines whether there is verbose logging on the Serial Monitor
+#define VERBOSE 1
+
 #define PERCENT_TOP 100
 #define PERCENT_LOW 0
 #define PULSE_IN_TIMEOUT 25000
+// time a tick should roughly take.
+#define ROUGH_TICK_TIME 1000
+
+
+
+#define SERVO_1_PORT 2
+
+#define MIN_ARM_STRENGTH 50 // (60)
+#define MAX_ARM_STRENGTH 100
+
+unsigned long START_TIME;
+
+Servo servo_1;
 
 struct ValueSet {
   unsigned char thrust;
@@ -10,6 +28,11 @@ struct ValueSet {
 };
 
 void setup() {
+  START_TIME = millis();
+
+  // Set output pins
+  servo_1.attach(SERVO_1_PORT);
+
   // Set input pins
   pinMode(5, INPUT);
   pinMode(6, INPUT);
@@ -18,6 +41,9 @@ void setup() {
 
   // Connect to computer for outputting debug information
   Serial.begin(9600);
+
+  Serial.print("Successfully booted up. Current time(should be close to zero), startup time:");
+  Serial.println(millis() - START_TIME);
 }
 
 int round_up_to_next_10(int to_round) {
@@ -73,16 +99,35 @@ unsigned long get_rotation_left_right_in_percent(unsigned long raw_value) {
   return min(rounded_value, 100);
 }
 
+
+void log_values(unsigned long value, String name, unsigned long raw_value) {
+  Serial.print("Current ");
+  Serial.print(name);
+  Serial.print(" value: ");
+
+  Serial.print(value);
+
+  if (VERBOSE) {
+    Serial.print("% (");
+    Serial.print(raw_value);
+    Serial.println(")");
+  } else {
+    Serial.println("%");
+  }
+}
+
 void loop() {
+  unsigned long tick_start_time = millis();
+
   // horizontal (left/right)
   int ch1 = read_value(5);
   // horizontal movement (forward/backward)
   int ch2 = read_value(8);
-  // horizontal rotation (thrust -> up/down)
+  // vertical movement (thrust -> up/down)
   int ch3 = read_value(7);
   // rotation own axis
   int ch4 = read_value(6);
-
+ 
   ValueSet values = {
     get_thrust_in_percent(ch3),
     get_movement_forward_backward_in_percent(ch2),
@@ -90,31 +135,45 @@ void loop() {
     get_rotation_left_right_in_percent(ch4)
   };
 
-  Serial.print("Current thrust: ");
-  Serial.print(values.thrust);
-  Serial.print("% (");
-  Serial.print(ch3);
-  Serial.println(")");
+  log_values(values.thrust, "Thrust", ch3);
 
-  Serial.print("Current rotation value: ");
-  Serial.print(values.rotation_l_r);
-  Serial.print("% (");
-  Serial.print(ch4);
-  Serial.println(")");
+  Serial.print("Experimental map: ");
+  int thrust_value = map(values.thrust, 0, 100, MIN_ARM_STRENGTH, MAX_ARM_STRENGTH);
+  Serial.println(thrust_value);
 
-  Serial.print("Current left/right value: ");
-  Serial.print(values.movement_l_r);
-  Serial.print("% (");
-  Serial.print(ch1);
-  Serial.println(")");
+  servo_1.write(thrust_value);
 
-  Serial.print("Current movement (forward/backward): ");
-  Serial.print(values.movement_f_b);
-  Serial.print("% (");
-  Serial.print(ch2);
-  Serial.println(")");
+  log_values(values.rotation_l_r, "Rotation (left/right)", ch4);
 
-  Serial.println(); // make some room for the next output season
+  log_values(values.movement_l_r, "Movement (left/right)", ch1);
 
-  delay(2000);
+  log_values(values.movement_f_b, "Movement (forward/backward)", ch2);
+
+  unsigned long tick_duration = millis() - tick_start_time;
+
+  Serial.print("Tick took ");
+  Serial.print(tick_duration);
+  Serial.println("ms");
+
+
+  // sleep for as long as we need to have a consistent tick time of 200ms.
+
+  // if we already took ROUGH_TICK_TIME ms(which should never happen lol), we abort asafp
+  if (tick_duration >= ROUGH_TICK_TIME) {
+    Serial.println("[WARNING] Tick duration was higher than ROUGH_TICK_TIME!");
+    Serial.println();
+    return;
+  } else {
+    // tick_duration is lower than ROUGH_TICK_TIME now
+
+    // calculate how much time we need to sleep
+    unsigned long sleep_time = ROUGH_TICK_TIME - tick_duration;
+    Serial.print("Sleeping for ");
+    Serial.print(sleep_time);
+    Serial.println("ms… ");
+
+    delay(sleep_time);
+    Serial.println("Woked up");
+    Serial.println(); // make some room for the next output season
+  }
 }
