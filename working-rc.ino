@@ -3,10 +3,10 @@
 #define PULSE_IN_TIMEOUT 25000
 
 struct ValueSet {
-   unsigned char thrust;
-   unsigned char movement_f_b;
-   unsigned char movement_l_r;
-   unsigned char rotation_l_r;
+  unsigned char thrust;
+  unsigned char movement_f_b;
+  unsigned char movement_l_r;
+  unsigned char rotation_l_r;
 };
 
 void setup() {
@@ -25,9 +25,9 @@ int round_up_to_next_10(int to_round) {
   return (10 - to_round % 10) + to_round;
 }
 
-int round_down_to_next_10(int to_round) {
-  return to_round - to_round % 10;
-}
+// int round_down_to_next_10(int to_round) {
+//  return to_round - to_round % 10;
+// }
 
 unsigned long read_value(int channel_id) {
   return pulseIn(channel_id, HIGH, PULSE_IN_TIMEOUT);
@@ -67,7 +67,7 @@ unsigned int get_movement_left_right_in_percent(unsigned long raw_value) {
 // 50% -> steady
 // 100% -> right
 unsigned long get_rotation_left_right_in_percent(unsigned long raw_value) {
-  unsigned long mapped_value = map(raw_value, 1130, 1885, PERCENT_LOW, PERCENT_TOP);
+  unsigned long mapped_value = map(raw_value, 987, 1744, PERCENT_LOW, PERCENT_TOP);
   unsigned int rounded_value = round_up_to_next_10(mapped_value);
 
   return min(rounded_value, 100);
@@ -93,21 +93,24 @@ void loop() {
   Serial.print("Current thrust: ");
   Serial.print(values.thrust);
   Serial.println("%");
-  Serial.print("Current movement (forward/backward): ");
-  Serial.print(values.movement_f_b);
-  Serial.println("%");
+
+  Serial.print("Current rotation value: ");
+  Serial.print(values.rotation_l_r);
+  Serial.print("% (");
+  Serial.print(ch4);
+  Serial.println(")");
 
   Serial.print("Current left/right value: ");
   Serial.print(values.movement_l_r);
   Serial.println("%");
 
-  Serial.print("Current rotation value: ");
-  Serial.print(ch4);
-  Serial.print(" ");
-  Serial.print(values.rotation_l_r);
+  Serial.print("Current movement (forward/backward): ");
+  Serial.print(values.movement_f_b);
   Serial.println("%");
+
+
 
   Serial.println(); // make some room for the next output season
 
-  delay(1000);
+  delay(2000);
 }
