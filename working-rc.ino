@@ -1,7 +1,7 @@
 #include<Servo.h>
 
 // Defines whether there is verbose logging on the Serial Monitor
-#define VERBOSE 1
+#define VERBOSE 0
 
 #define PERCENT_TOP 100
 #define PERCENT_LOW 0
@@ -146,8 +146,10 @@ void loop() {
   int new_thrust = calculate_thrust(values.thrust);
 
   if (new_thrust != LAST_THRUST_VALUE) {
-    Serial.print("New thrust value: ");
-    Serial.println(new_thrust);
+    if (VERBOSE) {
+      Serial.print("New thrust value: ");
+      Serial.println(new_thrust);
+    }
     LAST_THRUST_VALUE = new_thrust;
     servo_1.write(LAST_THRUST_VALUE);
   }
@@ -161,9 +163,12 @@ void loop() {
 
   unsigned long tick_duration = millis() - tick_start_time;
 
-  Serial.print("Tick took ");
-  Serial.print(tick_duration);
-  Serial.println("ms");
+
+  if (VERBOSE) {
+    Serial.print("Tick took ");
+    Serial.print(tick_duration);
+    Serial.println("ms");
+  }
 
 
   // sleep for as long as we need to have a consistent tick time of 200ms.
@@ -178,12 +183,21 @@ void loop() {
 
     // calculate how much time we need to sleep
     unsigned long sleep_time = ROUGH_TICK_TIME - tick_duration;
-    Serial.print("Sleeping for ");
-    Serial.print(sleep_time);
-    Serial.println("ms… ");
+
+
+
+    if (VERBOSE) {
+      Serial.print("Sleeping for ");
+      Serial.print(sleep_time);
+      Serial.println("ms… ");
+    }
 
     delay(sleep_time);
-    Serial.println("Woked up");
+
+    if (VERBOSE) {
+      Serial.println("Woked up");
+    }
+    
     Serial.println(); // make some room for the next output season
   }
 }
