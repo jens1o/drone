@@ -16,7 +16,7 @@
 // MUST NOT be too less, otherwise we will get weird values
 #define PULSE_IN_TIMEOUT 25000
 // time a tick should roughly take.
-#define ROUGH_TICK_TIME 225 // 225
+#define ROUGH_TICK_TIME 500 // 225
 
 // It is important that this port is not connected to anything at all!
 #define RANDOM_SEED_PORT 12
@@ -65,9 +65,11 @@ class BatteryManager
       int raw_value = analogRead(CLEANUP_BATTERY_CHECK_PORT);
 
       this->voltage_value = raw_value * (5.00 / 1023.00) * 2;
+#ifdef VERBOSE
       Serial.print("Battery voltage: ");
       Serial.print(voltage_value);
       Serial.println("V");
+#endif
     }
 
     virtual bool needNewValue() {
@@ -93,7 +95,7 @@ class BatteryManager
       float voltage_value = this->getVoltage();
 
       if (voltage_value <= 6.50) {
-        return true;
+        return true; // TODO: Change for production
       }
 
       return true;
@@ -119,6 +121,7 @@ void setup() {
   // Connect to computer for outputting debug information on baud 9600
   Serial.begin(9600);
 
+  // seed the (pseudo-)random number generator
   randomSeed(RANDOM_SEED_PORT);
 
   // Set output pins
@@ -172,7 +175,7 @@ unsigned long read_value(int channel_id) {
 }
 
 unsigned char get_thrust_in_percent(unsigned long raw_value) {
-  unsigned long mapped_value = map(raw_value, 1060, 1874, PERCENT_LOW, PERCENT_TOP);
+  unsigned long mapped_value = map(raw_value, 1040, 1874, PERCENT_LOW, PERCENT_TOP);
 
   return min(mapped_value, 100);
 }
@@ -204,7 +207,7 @@ unsigned int get_movement_left_right_in_percent(unsigned long raw_value) {
 // 50% -> steady
 // 100% -> right
 unsigned long get_rotation_left_right_in_percent(unsigned long raw_value) {
-  unsigned long mapped_value = map(raw_value, 1100, 1872, PERCENT_LOW, PERCENT_TOP);
+  unsigned long mapped_value = map(raw_value, 1098, 1872, PERCENT_LOW, PERCENT_TOP);
   unsigned int rounded_value = check_if_neutral(mapped_value);
 
   return min(rounded_value, 100);
@@ -297,27 +300,38 @@ void loop() {
     Serial.println();
     return;
   } else {
-    // Cleanup tasks, they should not take too much time though
+    // only do cleanup tasks if we have some greater timespan to invest into.
+    bool cleanUpTaskWorth = (ROUGH_TICK_TIME - tick_duration) >= 50;
 
+    if (cleanUpTaskWorth) {
+      Serial.println("Doing cleanup tasks.");
+      // Cleanup tasks, they should not take too much time though
 #ifdef CLEANUP_BATTERY_CHECK
-    if (!btrMgr->isBatteryOk()) {
-      shutdown();
-      return;
-    }
+      if (!btrMgr->isBatteryOk()) {
+        shutdown();
+        return;
+      }
 #endif
 
-    // tick_duration is lower than ROUGH_TICK_TIME now, thus recalculate it
-    unsigned long tick_duration = millis() - tick_start_time;
+      // tick_duration is lower than ROUGH_TICK_TIME now, thus recalculate it
+      unsigned long tick_duration = millis() - tick_start_time;
 
-    // check whether the cleanup task took too long
-    if (tick_duration >= ROUGH_TICK_TIME) {
-      Serial.println("[WARNING] \"Cleanup task\" took too much time!");
-      Serial.println();
-      return;
+      // check whether the cleanup task took too long
+      if (tick_duration >= ROUGH_TICK_TIME) {
+        Serial.println("[WARNING] \"Cleanup task\" took too much time!");
+        Serial.println();
+        return;
+      }
     }
 
     // calculate how much time we need to sleep now
-    unsigned long sleep_time = ROUGH_TICK_TIME - tick_duration;
+    unsigned long sleep_time = ROUGH_TICK_TIME - (millis() - tick_start_time);
+
+    // ignore overflows/underflows
+    if (sleep_time <= 0 || sleep_time >= 1000) {
+      Serial.println("[WARNING] Underflow or overflow detected!");
+      return;
+    }
 
 #ifdef VERBOSE
     Serial.print("Sleeping for ");
