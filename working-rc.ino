@@ -16,7 +16,7 @@
 // MUST NOT be too less, otherwise we will get weird values
 #define PULSE_IN_TIMEOUT 25000
 // time a tick should roughly take.
-#define ROUGH_TICK_TIME 2500 // 225
+#define ROUGH_TICK_TIME 225 // 225
 
 // It is important that this port is not connected to anything at all!
 #define RANDOM_SEED_PORT 12
@@ -119,16 +119,6 @@ void setup() {
   // Connect to computer for outputting debug information on baud 9600
   Serial.begin(9600);
 
-#ifdef CLEANUP_BATTERY_CHECK
-  btrMgr = new BatteryManager();
-
-  if (!btrMgr->isBatteryOk()) {
-    shutdown();
-    return;
-  }
-#endif
-
-
   randomSeed(RANDOM_SEED_PORT);
 
   // Set output pins
@@ -138,6 +128,15 @@ void setup() {
   for (int i = 0; i < sizeof(INPUT_PORTS); i++) {
     pinMode(INPUT_PORTS[i], INPUT);
   }
+
+#ifdef CLEANUP_BATTERY_CHECK
+  btrMgr = new BatteryManager();
+
+  if (!btrMgr->isBatteryOk()) {
+    shutdown();
+    return;
+  }
+#endif
 
   Serial.print("Successfully booted up. Startup took");
   Serial.print(millis() - START_TIME);
