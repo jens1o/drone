@@ -5,7 +5,7 @@
 // not commented out = debug mode
 #define VERBOSE
 
-#define CLEANUP_BATTERY_CHECK
+//#define CLEANUP_BATTERY_CHECK
 
 #ifdef CLEANUP_BATTERY_CHECK
 #define CLEANUP_BATTERY_CHECK_PORT A0
@@ -16,23 +16,26 @@
 // MUST NOT be too less, otherwise we will get weird values
 #define PULSE_IN_TIMEOUT 25000
 // time a tick should roughly take.
-#define ROUGH_TICK_TIME 500 // 225
+#define ROUGH_TICK_TIME 1000 // 225
 
 // It is important that this port is not connected to anything at all!
 #define RANDOM_SEED_PORT 12
 
-#define SERVO_1_PORT 9
-#define SERVO_2_PORT 10
-#define SERVO_3_PORT 11
-#define SERVO_4_PORT 12
+#define ROTOR_1_PORT 9
+#define ROTOR_2_PORT 10
+#define ROTOR_3_PORT 11
+#define ROTOR_4_PORT 12
 
 #define CHANNEL_1_PORT 5
 #define CHANNEL_2_PORT 8
 #define CHANNEL_3_PORT 7
 #define CHANNEL_4_PORT 6
 
-#define MIN_ARM_STRENGTH 55 // (60)
-#define MAX_ARM_STRENGTH 100
+#define ROTOR_1_MIN_STRENGTH 55 // (60)
+#define ROTOR_1_MAX_STRENGTH 100
+
+#define ROTOR_2_MIN_STRENGTH 70 // (60)
+#define ROTOR_2_MAX_STRENGTH 120
 
 unsigned long START_TIME = 0;
 
@@ -40,13 +43,9 @@ int last_thrust_value = 0;
 
 int INPUT_PORTS[] = {CHANNEL_1_PORT, CHANNEL_2_PORT, CHANNEL_3_PORT, CHANNEL_4_PORT};
 
-int SERVO_PORTS[] = {SERVO_1_PORT};
+int ROTOR_PORTS[] = {ROTOR_1_PORT};
 
 bool IS_SHUTDOWN = false;
-
-Servo servo_1;
-
-Servo servos[] = {servo_1};
 
 #ifdef CLEANUP_BATTERY_CHECK
 class BatteryManager
@@ -60,7 +59,7 @@ class BatteryManager
       this->last_battery_check = millis();
 #ifdef VERBOSE
       Serial.println("Need to refresh!");
-#endif
+#endif // VERBOSE
 
       int raw_value = analogRead(CLEANUP_BATTERY_CHECK_PORT);
 
@@ -69,7 +68,7 @@ class BatteryManager
       Serial.print("Battery voltage: ");
       Serial.print(voltage_value);
       Serial.println("V");
-#endif
+#endif // VERBOSE
     }
 
     virtual bool needNewValue() {
@@ -95,13 +94,51 @@ class BatteryManager
       float voltage_value = this->getVoltage();
 
       if (voltage_value <= 6.50) {
-        return true; // TODO: Change for production
+        return true; // TODO: Change to false in production
       }
 
       return true;
     }
 };
-#endif
+#endif // CLEANUP_BATTERY_CHECK
+
+class Rotor {
+  private:
+    char min_arm_strength;
+    char max_arm_strength;
+    Servo servo_handle;
+
+  public:
+    Rotor(int servo_port, int min_arm_strength, int max_arm_strength) {
+      this->servo_handle.attach(servo_port);
+      Serial.print("Attached servo port: ");
+      Serial.println(servo_port);
+      this->min_arm_strength = min_arm_strength;
+      this->max_arm_strength = max_arm_strength;
+    }
+
+    virtual int getThrustValue(int raw_value) {
+#ifdef VERBOSE
+      if (raw_value > 100) {
+        Serial.println("[EMERGENCY] Thrust value out of range!");
+        return this->min_arm_strength;
+      }
+#endif // VERBOSE
+
+      return map(raw_value, 0, 100, this->min_arm_strength, this->max_arm_strength);
+    }
+
+    virtual void setThrust(int raw_value) {
+      int value = this->getThrustValue(raw_value);
+
+      Serial.print("Got this value: ");
+      Serial.println(value);
+
+      // this->servo_handle->write(value);
+
+      this->servo_handle.write(100);
+    }
+};
 
 struct ValueSet {
   unsigned char thrust;
@@ -112,7 +149,12 @@ struct ValueSet {
 
 #ifdef CLEANUP_BATTERY_CHECK
 BatteryManager *btrMgr;
-#endif
+#endif // CLEANUP_BATTERY_CHECK
+
+Rotor *rotor_1;
+Rotor *rotor_2;
+
+Servo test_servo;
 
 void setup() {
   // should be close to zero, otherwise the bootloader is doing quite crazy stuff?
@@ -121,12 +163,16 @@ void setup() {
   // Connect to computer for outputting debug information on baud 9600
   Serial.begin(9600);
 
+  test_servo.attach(9);
+  test_servo.write(80);
+
   // seed the (pseudo-)random number generator
   randomSeed(RANDOM_SEED_PORT);
 
   // Set output pins
-  servo_1.attach(SERVO_1_PORT);
-
+  //rotor_1 = new Rotor(ROTOR_1_PORT, ROTOR_1_MIN_STRENGTH, ROTOR_1_MAX_STRENGTH);
+  //rotor_2 = new Rotor(ROTOR_2_PORT, ROTOR_2_MIN_STRENGTH, ROTOR_2_MAX_STRENGTH);
+  
   // Initalize input pins for reading values from them
   for (int i = 0; i < sizeof(INPUT_PORTS); i++) {
     pinMode(INPUT_PORTS[i], INPUT);
@@ -139,21 +185,22 @@ void setup() {
     shutdown();
     return;
   }
-#endif
+#endif // CLEANUP_BATTERY_CHECK
 
-  Serial.print("Successfully booted up. Startup took");
+  Serial.print("Successfully booted up. Startup took ");
   Serial.print(millis() - START_TIME);
   Serial.println("ms");
 
   // arduino bootloader now starts with calling loop() over and over again as soon as we return
 }
+
 void shutdown() {
   IS_SHUTDOWN = true;
 
   // Shutdown the servos
-  for (int i = 0; i < sizeof(servos); i++) {
-    servos[i].write(MIN_ARM_STRENGTH);
-  }
+
+  rotor_1->setThrust(0);
+  rotor_2->setThrust(0);
 
   Serial.println("[EMERGENCY] Shutdown!");
 }
@@ -165,10 +212,6 @@ int check_if_neutral(int to_round) {
 
   return to_round;
 }
-
-// int round_down_to_next_10(int to_round) {
-//  return to_round - to_round % 10;
-// }
 
 unsigned long read_value(int channel_id) {
   return pulseIn(channel_id, HIGH, PULSE_IN_TIMEOUT);
@@ -226,26 +269,23 @@ void log_values(unsigned long value, String name, unsigned long raw_value) {
   Serial.println(")");
 #else
   Serial.println("%");
-#endif
+#endif // VERBOSE
 }
 
-int calculate_thrust_output(unsigned long raw_value) {
-  return map(raw_value, 0, 100, MIN_ARM_STRENGTH, MAX_ARM_STRENGTH);
-}
-
-void set_thrust_if_changed(int thrust_value) {
+void set_thrust_if_changed(int thrust_value) {  
   if (thrust_value != last_thrust_value) {
 #ifdef VERBOSE
     Serial.print("New thrust value: ");
     Serial.println(thrust_value);
-#endif
+#endif // VERBOSE
     last_thrust_value = thrust_value;
   } else {
     // same thrust, nothing to do
     return;
   }
 
-  servo_1.write(thrust_value);
+  //rotor_1->setThrust(thrust_value);
+  //rotor_2->setThrust(thrust_value);
 }
 
 void loop() {
@@ -274,14 +314,11 @@ void loop() {
   };
 
   log_values(values.thrust, "Thrust", ch3);
-
   log_values(values.rotation_l_r, "Rotation (left/right)", ch4);
-
   log_values(values.movement_l_r, "Movement (left/right)", ch1);
-
   log_values(values.movement_f_b, "Movement (forward/backward)", ch2);
 
-  set_thrust_if_changed(calculate_thrust_output(values.thrust));
+  set_thrust_if_changed(values.thrust);
 
   unsigned long tick_duration = millis() - tick_start_time;
 
@@ -311,7 +348,7 @@ void loop() {
         shutdown();
         return;
       }
-#endif
+#endif // CLEANUP_BATTERY_CHECK
 
       // tick_duration is lower than ROUGH_TICK_TIME now, thus recalculate it
       unsigned long tick_duration = millis() - tick_start_time;
@@ -337,13 +374,13 @@ void loop() {
     Serial.print("Sleeping for ");
     Serial.print(sleep_time);
     Serial.println("ms… ");
-#endif
+#endif // VERBOSE
 
     delay(sleep_time);
 
 #ifdef VERBOSE
     Serial.println("Woked up");
-#endif
+#endif // VERBOSE
 
     Serial.println(); // make some room for the next output season
   }
