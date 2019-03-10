@@ -9,7 +9,7 @@
 
 #ifdef CLEANUP_BATTERY_CHECK
 #define CLEANUP_BATTERY_CHECK_PORT A0
-#endif
+#endif // CLEANUP_BATTERY_CHECK
 
 #define PERCENT_TOP 100
 #define PERCENT_LOW 0
@@ -65,13 +65,16 @@ class PowerManager
       Serial.println("V");
 #endif // VERBOSE
     }
-    
+
     // Checks whether the value hold in cache is still up to date
     // (avoiding a persistent leak of time)
     virtual void MaybeRefreshCache()
     {
       // check whether the last read was (at least) 30 seconds ago
-      if ((millis() - this->last_battery_check_) >= 30 * 1000) {
+      bool shouldRefreshCache = ((millis() - this->last_battery_check_) >= 30 * 1000);
+
+      if (shouldRefreshCache) {
+        // update cache by reading the value and save it
         this->ReadVoltage();
       }
     }
@@ -98,7 +101,8 @@ class PowerManager
 };
 #endif // CLEANUP_BATTERY_CHECK
 
-struct ValueSet {
+struct ValueSet
+{
   int thrust;
   int movement_f_b;
   int movement_l_r;
@@ -109,17 +113,17 @@ struct ValueSet {
 PowerManager *pwrMgr;
 #endif // CLEANUP_BATTERY_CHECK
 
-
-unsigned long START_TIME = 0;
+unsigned long start_time;
 
 int last_thrust_value = 0;
 
 int const INPUT_PORTS[] = {RANDOM_SEED_PORT, CHANNEL_1_PORT, CHANNEL_2_PORT, CHANNEL_3_PORT, CHANNEL_4_PORT};
 // in the arduino world, there is no reliable way of knowing how long an array is, thus computing this at compile time!
-#define inputPortLength (sizeof(INPUT_PORTS)/sizeof(int))
+#define kInputPortLength (sizeof(INPUT_PORTS)/sizeof(int))
 
 // should not be changed
 bool is_shutdown = false;
+
 Servo rotor_1, rotor_2;
 
 // This is the entry point for our program.
@@ -127,16 +131,16 @@ Servo rotor_1, rotor_2;
 // and our chance to initalize some basic stuff(like input ports, rotors…)
 void setup() {
   // should be close (if not equal) to zero, otherwise the bootloader is doing quite crazy stuff?
-  START_TIME = millis();
+  start_time = millis();
 
   // Initalize input pins for reading values from them
-  for (int i = 0; i < inputPortLength; i++) {
+  for (int i = 0; i < kInputPortLength; i++) {
     pinMode(INPUT_PORTS[i], INPUT);
   }
-  
+
   // seed the (pseudo-)random number generator asap on an **unconnected** pin
   randomSeed(analogRead(RANDOM_SEED_PORT));
-  
+
   // Connect to a (potential) computer for outputting debug information on baud 9600
   Serial.begin(9600);
 
@@ -168,7 +172,7 @@ void setup() {
 #endif // CLEANUP_BATTERY_CHECK
 
   Serial.print("Successfully booted up. Startup took ");
-  Serial.print(millis() - START_TIME);
+  Serial.print(millis() - start_time);
   Serial.println("ms");
 
   // arduino bootloader now starts with calling loop() over and over again as soon as we return
@@ -207,7 +211,7 @@ unsigned long readValue(int channel_id) {
   return pulseIn(channel_id, HIGH, PULSE_IN_TIMEOUT);
 }
 
-unsigned char get_thrust_in_percent(unsigned long raw_value) {
+unsigned char getThrustInPercent(unsigned long raw_value) {
   unsigned long mapped_value = map(raw_value, 1040, 1874, PERCENT_LOW, PERCENT_TOP);
 
   return min(mapped_value, 100);
@@ -217,7 +221,7 @@ unsigned char get_thrust_in_percent(unsigned long raw_value) {
 // 0% -> backwards
 // 50% -> steady
 // 100% -> forwards
-int get_movement_forward_backward_in_percent(unsigned long raw_value) {
+int getMovementForwardBackwardInPercent(unsigned long raw_value) {
   unsigned long mapped_value = map(raw_value, 1132, 1914, PERCENT_LOW, PERCENT_TOP);
   int rounded_value = maybeSnapNeutral(mapped_value);
 
@@ -228,7 +232,7 @@ int get_movement_forward_backward_in_percent(unsigned long raw_value) {
 // 0% -> left
 // 50% -> steady
 // 100% -> right
-int get_movement_left_right_in_percent(unsigned long raw_value) {
+int getMovementLeftRightInPercent(unsigned long raw_value) {
   unsigned long mapped_value = map(raw_value, 1128, 1887, PERCENT_LOW, PERCENT_TOP);
   unsigned int rounded_value = maybeSnapNeutral(mapped_value);
 
@@ -239,7 +243,7 @@ int get_movement_left_right_in_percent(unsigned long raw_value) {
 // 0% -> left
 // 50% -> steady
 // 100% -> right
-int get_rotation_left_right_in_percent(unsigned long raw_value) {
+int getRotationLeftRightInPercent(unsigned long raw_value) {
   unsigned long mapped_value = map(raw_value, 1098, 1872, PERCENT_LOW, PERCENT_TOP);
   long rounded_value = maybeSnapNeutral(mapped_value);
 
@@ -305,10 +309,10 @@ void loop() {
   int ch4 = readValue(CHANNEL_4_PORT);
 
   ValueSet values = {
-    get_thrust_in_percent(ch3),
-    get_movement_forward_backward_in_percent(ch2),
-    get_movement_left_right_in_percent(ch1),
-    get_rotation_left_right_in_percent(ch4)
+    getThrustInPercent(ch3),
+    getMovementForwardBackwardInPercent(ch2),
+    getMovementLeftRightInPercent(ch1),
+    getRotationLeftRightInPercent(ch4)
   };
 
   logValue(values.thrust, "Thrust", ch3);
@@ -324,7 +328,7 @@ void loop() {
   Serial.print("Tick took ");
   Serial.print(tick_duration);
   Serial.println("ms");
-#endif
+#endif // VERBOSE
 
   // sleep for as long as we need to have a consistent tick time of ROUGH_TICK_TIME ms.
 
