@@ -132,15 +132,13 @@ void setup() {
   // Initalize input pins for reading values from them
   for (int i = 0; i < inputPortLength; i++) {
     pinMode(INPUT_PORTS[i], INPUT);
-    Serial.print("Iteration: ");
-    Serial.println(i);
   }
-
-  // Connect to a (potential) computer for outputting debug information on baud 9600
-  Serial.begin(9600);
   
   // seed the (pseudo-)random number generator asap on an **unconnected** pin
   randomSeed(analogRead(RANDOM_SEED_PORT));
+  
+  // Connect to a (potential) computer for outputting debug information on baud 9600
+  Serial.begin(9600);
 
   // Set output pins
   rotor_1.attach(ROTOR_1_PORT, ROTOR_1_MIN_STRENGTH, ROTOR_1_MAX_STRENGTH);
