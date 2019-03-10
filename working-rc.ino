@@ -37,64 +37,60 @@
 #define ROTOR_2_MIN_STRENGTH 990 // (60)
 #define ROTOR_2_MAX_STRENGTH 2500
 
-unsigned long START_TIME = 0;
-
-int last_thrust_value = 0;  
-
-int INPUT_PORTS[] = {CHANNEL_1_PORT, CHANNEL_2_PORT, CHANNEL_3_PORT, CHANNEL_4_PORT};
-
-int ROTOR_PORTS[] = {ROTOR_1_PORT};
-
-bool IS_SHUTDOWN = false;
-
 #ifdef CLEANUP_BATTERY_CHECK
-class BatteryManager
+// This class provides functions for checking whether we have enough electrical power,
+// and avoid (permanently) harming the battery if it is going to be empty soon.
+class PowerManager
 {
   private:
-    float voltage_value;
-    unsigned long last_battery_check = START_TIME;
+    float voltage_value_;
+    unsigned long last_battery_check_ = 0;
 
   public:
-    virtual void readVoltage() {
-      this->last_battery_check = millis();
+    // Reads and converts the raw value from the power supply and stores
+    // it(can be recieved by `GetVoltage()`).
+    virtual void ReadVoltage()
+    {
+      this->last_battery_check_ = millis();
 #ifdef VERBOSE
-      Serial.println("Need to refresh!");
+      Serial.println("Reading new voltage value from power supply!");
 #endif // VERBOSE
 
       int raw_value = analogRead(CLEANUP_BATTERY_CHECK_PORT);
 
-      this->voltage_value = raw_value * (5.00 / 1023.00) * 2;
+      this->voltage_value_ = raw_value * (5.00 / 1023.00) * 2;
 #ifdef VERBOSE
       Serial.print("Battery voltage: ");
-      Serial.print(voltage_value);
+      Serial.print(this->voltage_value_);
       Serial.println("V");
 #endif // VERBOSE
     }
-
-    virtual bool needNewValue() {
+    
+    // Checks whether the value hold in cache is still up to date
+    // (avoiding a persistent leak of time)
+    virtual void MaybeRefreshCache()
+    {
       // check whether the last read was (at least) 30 seconds ago
-      if ((millis() - this->last_battery_check) >= 30 * 1000) {
-        return true;
+      if ((millis() - this->last_battery_check_) >= 30 * 1000) {
+        this->ReadVoltage();
       }
-
-      return false;
     }
 
-    virtual float getVoltage() {
+    virtual float GetVoltage()
+    {
       // check whether we need to read the voltage again because of new conditions
-      if (this->needNewValue()) {
-        // and if we, read the value
-        this->readVoltage();
-      }
+      this->MaybeRefreshCache();
 
-      return this->voltage_value;
+      return this->voltage_value_;
     }
 
-    virtual bool isBatteryOk() {
-      float voltage_value = this->getVoltage();
+    virtual bool PowerSupplyIsOkay()
+    {
+      float voltage_value = this->GetVoltage();
 
       if (voltage_value <= 6.50) {
-        return true; // TODO: Change to false in production
+        Serial.println("[WARNING] Power supply is too low!");
+        return false; // TODO: Change to false in production
       }
 
       return true;
@@ -103,28 +99,48 @@ class BatteryManager
 #endif // CLEANUP_BATTERY_CHECK
 
 struct ValueSet {
-  unsigned char thrust;
-  unsigned char movement_f_b;
-  unsigned char movement_l_r;
-  unsigned char rotation_l_r;
+  int thrust;
+  int movement_f_b;
+  int movement_l_r;
+  int rotation_l_r;
 };
 
 #ifdef CLEANUP_BATTERY_CHECK
-BatteryManager *btrMgr;
+PowerManager *pwrMgr;
 #endif // CLEANUP_BATTERY_CHECK
 
-Servo rotor_1;
-Servo rotor_2;
 
+unsigned long START_TIME = 0;
+
+int last_thrust_value = 0;
+
+int const INPUT_PORTS[] = {RANDOM_SEED_PORT, CHANNEL_1_PORT, CHANNEL_2_PORT, CHANNEL_3_PORT, CHANNEL_4_PORT};
+// in the arduino world, there is no reliable way of knowing how long an array is, thus computing this at compile time!
+#define inputPortLength (sizeof(INPUT_PORTS)/sizeof(int))
+
+// should not be changed
+bool is_shutdown = false;
+Servo rotor_1, rotor_2;
+
+// This is the entry point for our program.
+// This method is being called by the bootloader after its usual boot-up stuff
+// and our chance to initalize some basic stuff(like input ports, rotors…)
 void setup() {
-  // should be close to zero, otherwise the bootloader is doing quite crazy stuff?
+  // should be close (if not equal) to zero, otherwise the bootloader is doing quite crazy stuff?
   START_TIME = millis();
 
-  // Connect to computer for outputting debug information on baud 9600
-  Serial.begin(9600);
+  // Initalize input pins for reading values from them
+  for (int i = 0; i < inputPortLength; i++) {
+    pinMode(INPUT_PORTS[i], INPUT);
+    Serial.print("Iteration: ");
+    Serial.println(i);
+  }
 
-  // seed the (pseudo-)random number generator
-  randomSeed(RANDOM_SEED_PORT);
+  // Connect to a (potential) computer for outputting debug information on baud 9600
+  Serial.begin(9600);
+  
+  // seed the (pseudo-)random number generator asap on an **unconnected** pin
+  randomSeed(analogRead(RANDOM_SEED_PORT));
 
   // Set output pins
   rotor_1.attach(ROTOR_1_PORT, ROTOR_1_MIN_STRENGTH, ROTOR_1_MAX_STRENGTH);
@@ -144,15 +160,10 @@ void setup() {
 
   //rotor_2 = new Rotor(ROTOR_2_PORT, ROTOR_2_MIN_STRENGTH, ROTOR_2_MAX_STRENGTH);
 
-  // Initalize input pins for reading values from them
-  for (int i = 0; i < sizeof(INPUT_PORTS); i++) {
-    pinMode(INPUT_PORTS[i], INPUT);
-  }
-
 #ifdef CLEANUP_BATTERY_CHECK
-  btrMgr = new BatteryManager();
+  pwrMgr = new PowerManager();
 
-  if (!btrMgr->isBatteryOk()) {
+  if (!pwrMgr->PowerSupplyIsOkay()) {
     shutdown();
     return;
   }
@@ -165,26 +176,36 @@ void setup() {
   // arduino bootloader now starts with calling loop() over and over again as soon as we return
 }
 
+// Marks this program as shut down, shuts down the servo.
+// Please note that does *NOT* actually terminate the program
+// (as it is impossible to turn an Arduino off by itself)!
 void shutdown() {
-  IS_SHUTDOWN = true;
+  // mark program as shut down
+  is_shutdown = true;
 
   // Shutdown the servos
-
   rotor_1.write(0);
   rotor_2.write(0);
 
   Serial.println("[EMERGENCY] Shutdown!");
 }
 
-int check_if_neutral(int to_round) {
-  if (to_round >= 45 && to_round <= 54) {
+// Snaps and return the value of 50 if it is inside a range
+// that is considered to ease behavior (rounding errors, minor differences
+// from remote control and known range).
+// Otherwise returns given value.
+int maybeSnapNeutral(int value) {
+  // mark everything 45..=54 as 50
+  if (value >= 45 && value <= 54) {
     return 50;
   }
 
-  return to_round;
+  return value;
 }
 
-unsigned long read_value(int channel_id) {
+// Reads and returns a raw PWM(pulse-width modulation) value from the given `channel_id` (i.e. the output port a cable
+// should be connected to).
+unsigned long readValue(int channel_id) {
   return pulseIn(channel_id, HIGH, PULSE_IN_TIMEOUT);
 }
 
@@ -198,9 +219,9 @@ unsigned char get_thrust_in_percent(unsigned long raw_value) {
 // 0% -> backwards
 // 50% -> steady
 // 100% -> forwards
-unsigned long get_movement_forward_backward_in_percent(unsigned long raw_value) {
+int get_movement_forward_backward_in_percent(unsigned long raw_value) {
   unsigned long mapped_value = map(raw_value, 1132, 1914, PERCENT_LOW, PERCENT_TOP);
-  unsigned int rounded_value = check_if_neutral(mapped_value);
+  int rounded_value = maybeSnapNeutral(mapped_value);
 
   return min(rounded_value, 100);
 }
@@ -209,9 +230,9 @@ unsigned long get_movement_forward_backward_in_percent(unsigned long raw_value) 
 // 0% -> left
 // 50% -> steady
 // 100% -> right
-unsigned int get_movement_left_right_in_percent(unsigned long raw_value) {
-  unsigned int mapped_value = map(raw_value, 1128, 1887, PERCENT_LOW, PERCENT_TOP);
-  unsigned int rounded_value = check_if_neutral(mapped_value);
+int get_movement_left_right_in_percent(unsigned long raw_value) {
+  unsigned long mapped_value = map(raw_value, 1128, 1887, PERCENT_LOW, PERCENT_TOP);
+  unsigned int rounded_value = maybeSnapNeutral(mapped_value);
 
   return min(rounded_value, 100);
 }
@@ -220,15 +241,21 @@ unsigned int get_movement_left_right_in_percent(unsigned long raw_value) {
 // 0% -> left
 // 50% -> steady
 // 100% -> right
-unsigned long get_rotation_left_right_in_percent(unsigned long raw_value) {
+int get_rotation_left_right_in_percent(unsigned long raw_value) {
   unsigned long mapped_value = map(raw_value, 1098, 1872, PERCENT_LOW, PERCENT_TOP);
-  unsigned int rounded_value = check_if_neutral(mapped_value);
+  long rounded_value = maybeSnapNeutral(mapped_value);
 
   return min(rounded_value, 100);
 }
 
 
-void log_values(unsigned long value, String name, unsigned long raw_value) {
+// Helper utility function to avoid clutter-code in the main function
+// that logs:
+//  * a) the name this value stands for(the first character should be upper-cased),
+//  * b) the value itself and
+//  * c) the raw value (we fed our algorithms with)
+// so they are printed out on the Serial Monitor(if connected).
+void logValue(unsigned long value, String name, unsigned long raw_value) {
   Serial.print(name);
   Serial.print(" value: ");
 
@@ -243,7 +270,9 @@ void log_values(unsigned long value, String name, unsigned long raw_value) {
 #endif // VERBOSE
 }
 
-void set_thrust_if_changed(int thrust_value) {
+// Writes the given thrust value to the rotors if and only if (iff) the value is new
+// (avoiding spamming them with time-consuming commands).
+void writeThrustIffNew(int thrust_value) {
   if (thrust_value != last_thrust_value) {
 #ifdef VERBOSE
     Serial.print("New thrust value: ");
@@ -251,16 +280,16 @@ void set_thrust_if_changed(int thrust_value) {
 #endif // VERBOSE
     last_thrust_value = thrust_value;
   } else {
-    // same thrust, nothing to do
+    // same thrust, nothing to do (saving time)
     return;
   }
 
-  //rotor_1->setThrust(thrust_value);
-  //rotor_2->setThrust(thrust_value);
+  rotor_1.write(thrust_value);
+  rotor_2.write(thrust_value);
 }
 
 void loop() {
-  if (IS_SHUTDOWN) {
+  if (is_shutdown) {
     // sleep for a little while to avoid busy loop as we cannot (really) shut the arduino down anyhow
     delay(1000);
     return;
@@ -269,13 +298,13 @@ void loop() {
   unsigned long tick_start_time = millis();
 
   // horizontal (left/right)
-  int ch1 = read_value(CHANNEL_1_PORT);
+  int ch1 = readValue(CHANNEL_1_PORT);
   // horizontal movement (forward/backward)
-  int ch2 = read_value(CHANNEL_2_PORT);
+  int ch2 = readValue(CHANNEL_2_PORT);
   // vertical movement (thrust -> up/down)
-  int ch3 = read_value(CHANNEL_3_PORT);
+  int ch3 = readValue(CHANNEL_3_PORT);
   // rotation own axis
-  int ch4 = read_value(CHANNEL_4_PORT);
+  int ch4 = readValue(CHANNEL_4_PORT);
 
   ValueSet values = {
     get_thrust_in_percent(ch3),
@@ -284,15 +313,14 @@ void loop() {
     get_rotation_left_right_in_percent(ch4)
   };
 
-  log_values(values.thrust, "Thrust", ch3);
-  log_values(values.rotation_l_r, "Rotation (left/right)", ch4);
-  log_values(values.movement_l_r, "Movement (left/right)", ch1);
-  log_values(values.movement_f_b, "Movement (forward/backward)", ch2);
+  logValue(values.thrust, "Thrust", ch3);
+  logValue(values.rotation_l_r, "Rotation (left/right)", ch4);
+  logValue(values.movement_l_r, "Movement (left/right)", ch1);
+  logValue(values.movement_f_b, "Movement (forward/backward)", ch2);
 
-  set_thrust_if_changed(values.thrust);
+  writeThrustIffNew(values.thrust);
 
   unsigned long tick_duration = millis() - tick_start_time;
-
 
 #ifdef VERBOSE
   Serial.print("Tick took ");
@@ -315,7 +343,7 @@ void loop() {
       Serial.println("Doing cleanup tasks.");
       // Cleanup tasks, they should not take too much time though
 #ifdef CLEANUP_BATTERY_CHECK
-      if (!btrMgr->isBatteryOk()) {
+      if (!pwrMgr->PowerSupplyIsOkay()) {
         shutdown();
         return;
       }
