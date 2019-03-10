@@ -31,15 +31,15 @@
 #define CHANNEL_3_PORT 7
 #define CHANNEL_4_PORT 6
 
-#define ROTOR_1_MIN_STRENGTH 55 // (60)
-#define ROTOR_1_MAX_STRENGTH 100
+#define ROTOR_1_MIN_STRENGTH 900 // (60)
+#define ROTOR_1_MAX_STRENGTH 2400
 
-#define ROTOR_2_MIN_STRENGTH 70 // (60)
-#define ROTOR_2_MAX_STRENGTH 120
+#define ROTOR_2_MIN_STRENGTH 990 // (60)
+#define ROTOR_2_MAX_STRENGTH 2500
 
 unsigned long START_TIME = 0;
 
-int last_thrust_value = 0;
+int last_thrust_value = 0;  
 
 int INPUT_PORTS[] = {CHANNEL_1_PORT, CHANNEL_2_PORT, CHANNEL_3_PORT, CHANNEL_4_PORT};
 
@@ -102,44 +102,6 @@ class BatteryManager
 };
 #endif // CLEANUP_BATTERY_CHECK
 
-class Rotor {
-  private:
-    char min_arm_strength;
-    char max_arm_strength;
-    Servo servo_handle;
-
-  public:
-    Rotor(int servo_port, int min_arm_strength, int max_arm_strength) {
-      this->servo_handle.attach(servo_port);
-      Serial.print("Attached servo port: ");
-      Serial.println(servo_port);
-      this->min_arm_strength = min_arm_strength;
-      this->max_arm_strength = max_arm_strength;
-    }
-
-    virtual int getThrustValue(int raw_value) {
-#ifdef VERBOSE
-      if (raw_value > 100) {
-        Serial.println("[EMERGENCY] Thrust value out of range!");
-        return this->min_arm_strength;
-      }
-#endif // VERBOSE
-
-      return map(raw_value, 0, 100, this->min_arm_strength, this->max_arm_strength);
-    }
-
-    virtual void setThrust(int raw_value) {
-      int value = this->getThrustValue(raw_value);
-
-      Serial.print("Got this value: ");
-      Serial.println(value);
-
-      // this->servo_handle->write(value);
-
-      this->servo_handle.write(100);
-    }
-};
-
 struct ValueSet {
   unsigned char thrust;
   unsigned char movement_f_b;
@@ -151,10 +113,8 @@ struct ValueSet {
 BatteryManager *btrMgr;
 #endif // CLEANUP_BATTERY_CHECK
 
-Rotor *rotor_1;
-Rotor *rotor_2;
-
-Servo test_servo;
+Servo rotor_1;
+Servo rotor_2;
 
 void setup() {
   // should be close to zero, otherwise the bootloader is doing quite crazy stuff?
@@ -163,16 +123,27 @@ void setup() {
   // Connect to computer for outputting debug information on baud 9600
   Serial.begin(9600);
 
-  test_servo.attach(9);
-  test_servo.write(80);
-
   // seed the (pseudo-)random number generator
   randomSeed(RANDOM_SEED_PORT);
 
   // Set output pins
-  //rotor_1 = new Rotor(ROTOR_1_PORT, ROTOR_1_MIN_STRENGTH, ROTOR_1_MAX_STRENGTH);
+  rotor_1.attach(ROTOR_1_PORT, ROTOR_1_MIN_STRENGTH, ROTOR_1_MAX_STRENGTH);
+  rotor_2.attach(ROTOR_2_PORT, ROTOR_2_MIN_STRENGTH, ROTOR_2_MAX_STRENGTH);
+
+  for (int i = 0; i <= 50; i++) {
+    rotor_1.write(i);
+    rotor_2.write(i);
+    Serial.print("Current i: ");
+    Serial.println(i);
+    delay(250);
+  }
+
+  delay(300);
+  shutdown();
+  return;
+
   //rotor_2 = new Rotor(ROTOR_2_PORT, ROTOR_2_MIN_STRENGTH, ROTOR_2_MAX_STRENGTH);
-  
+
   // Initalize input pins for reading values from them
   for (int i = 0; i < sizeof(INPUT_PORTS); i++) {
     pinMode(INPUT_PORTS[i], INPUT);
@@ -199,8 +170,8 @@ void shutdown() {
 
   // Shutdown the servos
 
-  rotor_1->setThrust(0);
-  rotor_2->setThrust(0);
+  rotor_1.write(0);
+  rotor_2.write(0);
 
   Serial.println("[EMERGENCY] Shutdown!");
 }
@@ -272,7 +243,7 @@ void log_values(unsigned long value, String name, unsigned long raw_value) {
 #endif // VERBOSE
 }
 
-void set_thrust_if_changed(int thrust_value) {  
+void set_thrust_if_changed(int thrust_value) {
   if (thrust_value != last_thrust_value) {
 #ifdef VERBOSE
     Serial.print("New thrust value: ");
