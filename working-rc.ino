@@ -5,10 +5,10 @@
 // not commented out = debug mode
 #define VERBOSE
 
-//#define CLEANUP_BATTERY_CHECK
+#define CLEANUP_BATTERY_CHECK
 
 #ifdef CLEANUP_BATTERY_CHECK
-#define CLEANUP_BATTERY_CHECK_PORT A0
+#define CLEANUP_BATTERY_CHECK_PORT 6
 #endif // CLEANUP_BATTERY_CHECK
 
 #define PERCENT_TOP 100
@@ -47,6 +47,12 @@ class PowerManager
     unsigned long last_battery_check_ = 0;
 
   public:
+    // This gets called once this instance is created
+    PowerManager(void) {
+      // read voltage upon creation to avoid having an empty cache
+      this->ReadVoltage();
+    }
+
     // Reads and converts the raw value from the power supply and stores
     // it(can be recieved by `GetVoltage()`).
     virtual void ReadVoltage()
@@ -148,20 +154,6 @@ void setup() {
   rotor_1.attach(ROTOR_1_PORT, ROTOR_1_MIN_STRENGTH, ROTOR_1_MAX_STRENGTH);
   rotor_2.attach(ROTOR_2_PORT, ROTOR_2_MIN_STRENGTH, ROTOR_2_MAX_STRENGTH);
 
-  for (int i = 0; i <= 50; i++) {
-    rotor_1.write(i);
-    rotor_2.write(i);
-    Serial.print("Current i: ");
-    Serial.println(i);
-    delay(250);
-  }
-
-  delay(300);
-  shutdown();
-  return;
-
-  //rotor_2 = new Rotor(ROTOR_2_PORT, ROTOR_2_MIN_STRENGTH, ROTOR_2_MAX_STRENGTH);
-
 #ifdef CLEANUP_BATTERY_CHECK
   power_manager = new PowerManager();
 
@@ -169,6 +161,8 @@ void setup() {
     shutdown();
     return;
   }
+#else
+  Serial.println("[NOTICE] Power Supply check is turned off!");
 #endif // CLEANUP_BATTERY_CHECK
 
   Serial.print("Successfully booted up. Startup took ");
