@@ -56,9 +56,9 @@ class PowerManager
       Serial.println("Reading new voltage value from power supply!");
 #endif // VERBOSE
 
-      int raw_value = analogRead(CLEANUP_BATTERY_CHECK_PORT);
+      int rawValue = analogRead(CLEANUP_BATTERY_CHECK_PORT);
 
-      this->voltage_value_ = raw_value * (5.00 / 1023.00) * 2;
+      this->voltage_value_ = rawValue * (5.00 / 1023.00) * 2;
 #ifdef VERBOSE
       Serial.print("Battery voltage: ");
       Serial.print(this->voltage_value_);
@@ -89,9 +89,9 @@ class PowerManager
 
     virtual bool PowerSupplyIsOkay()
     {
-      float voltage_value = this->GetVoltage();
+      float voltageValue = this->GetVoltage();
 
-      if (voltage_value <= 6.50) {
+      if (voltageValue <= 6.50) {
         Serial.println("[WARNING] Power supply is too low!");
         return false; // TODO: Change to false in production
       }
@@ -110,7 +110,7 @@ struct ValueSet
 };
 
 #ifdef CLEANUP_BATTERY_CHECK
-PowerManager *pwrMgr;
+PowerManager *power_manager;
 #endif // CLEANUP_BATTERY_CHECK
 
 unsigned long start_time;
@@ -121,7 +121,7 @@ int const INPUT_PORTS[] = {RANDOM_SEED_PORT, CHANNEL_1_PORT, CHANNEL_2_PORT, CHA
 // in the arduino world, there is no reliable way of knowing how long an array is, thus computing this at compile time!
 #define kInputPortLength (sizeof(INPUT_PORTS)/sizeof(int))
 
-// should not be changed
+
 bool is_shutdown = false;
 
 Servo rotor_1, rotor_2;
@@ -163,9 +163,9 @@ void setup() {
   //rotor_2 = new Rotor(ROTOR_2_PORT, ROTOR_2_MIN_STRENGTH, ROTOR_2_MAX_STRENGTH);
 
 #ifdef CLEANUP_BATTERY_CHECK
-  pwrMgr = new PowerManager();
+  power_manager = new PowerManager();
 
-  if (!pwrMgr->PowerSupplyIsOkay()) {
+  if (!power_manager->PowerSupplyIsOkay()) {
     shutdown();
     return;
   }
@@ -211,43 +211,40 @@ unsigned long readValue(int channel_id) {
   return pulseIn(channel_id, HIGH, PULSE_IN_TIMEOUT);
 }
 
-unsigned char getThrustInPercent(unsigned long raw_value) {
-  unsigned long mapped_value = map(raw_value, 1040, 1874, PERCENT_LOW, PERCENT_TOP);
+unsigned char getThrustInPercent(unsigned long rawValue) {
+  unsigned long mappedValue = map(rawValue, 1040, 1874, PERCENT_LOW, PERCENT_TOP);
 
-  return min(mapped_value, 100);
+  return min(mappedValue, 100);
 }
 
 // This function extracts the value like this:
 // 0% -> backwards
 // 50% -> steady
 // 100% -> forwards
-int getMovementForwardBackwardInPercent(unsigned long raw_value) {
-  unsigned long mapped_value = map(raw_value, 1132, 1914, PERCENT_LOW, PERCENT_TOP);
-  int rounded_value = maybeSnapNeutral(mapped_value);
+int getMovementForwardBackwardInPercent(unsigned long rawValue) {
+  unsigned long mappedValue = map(rawValue, 1132, 1914, PERCENT_LOW, PERCENT_TOP);
 
-  return min(rounded_value, 100);
+  return min(maybeSnapNeutral(mappedValue), 100);
 }
 
 // This function extracts the value like this:
 // 0% -> left
 // 50% -> steady
 // 100% -> right
-int getMovementLeftRightInPercent(unsigned long raw_value) {
-  unsigned long mapped_value = map(raw_value, 1128, 1887, PERCENT_LOW, PERCENT_TOP);
-  unsigned int rounded_value = maybeSnapNeutral(mapped_value);
+int getMovementLeftRightInPercent(unsigned long rawValue) {
+  unsigned long mappedValue = map(rawValue, 1128, 1887, PERCENT_LOW, PERCENT_TOP);
 
-  return min(rounded_value, 100);
+  return min(maybeSnapNeutral(mappedValue), 100);
 }
 
 // This function extracts the value like this:
 // 0% -> left
 // 50% -> steady
 // 100% -> right
-int getRotationLeftRightInPercent(unsigned long raw_value) {
-  unsigned long mapped_value = map(raw_value, 1098, 1872, PERCENT_LOW, PERCENT_TOP);
-  long rounded_value = maybeSnapNeutral(mapped_value);
+int getRotationLeftRightInPercent(unsigned long rawValue) {
+  unsigned long mappedValue= map(rawValue, 1098, 1872, PERCENT_LOW, PERCENT_TOP);
 
-  return min(rounded_value, 100);
+  return min(maybeSnapNeutral(mappedValue), 100);
 }
 
 
@@ -257,7 +254,7 @@ int getRotationLeftRightInPercent(unsigned long raw_value) {
 //  * b) the value itself and
 //  * c) the raw value (we fed our algorithms with)
 // so they are printed out on the Serial Monitor(if connected).
-void logValue(unsigned long value, String name, unsigned long raw_value) {
+void logValue(unsigned long value, String name, unsigned long rawValue) {
   Serial.print(name);
   Serial.print(" value: ");
 
@@ -265,7 +262,7 @@ void logValue(unsigned long value, String name, unsigned long raw_value) {
 
 #ifdef VERBOSE
   Serial.print("% (");
-  Serial.print(raw_value);
+  Serial.print(rawValue);
   Serial.println(")");
 #else
   Serial.println("%");
@@ -274,20 +271,20 @@ void logValue(unsigned long value, String name, unsigned long raw_value) {
 
 // Writes the given thrust value to the rotors if and only if (iff) the value is new
 // (avoiding spamming them with time-consuming commands).
-void writeThrustIffNew(int thrust_value) {
-  if (thrust_value != last_thrust_value) {
+void writeThrustIffNew(int thrustValue) {
+  if (thrustValue != last_thrust_value) {
 #ifdef VERBOSE
     Serial.print("New thrust value: ");
-    Serial.println(thrust_value);
+    Serial.println(thrustValue);
 #endif // VERBOSE
-    last_thrust_value = thrust_value;
+    last_thrust_value = thrustValue;
   } else {
     // same thrust, nothing to do (saving time)
     return;
   }
 
-  rotor_1.write(thrust_value);
-  rotor_2.write(thrust_value);
+  rotor_1.write(thrustValue);
+  rotor_2.write(thrustValue);
 }
 
 void loop() {
@@ -297,65 +294,65 @@ void loop() {
     return;
   }
 
-  unsigned long tick_start_time = millis();
+  unsigned long tickStartTime = millis();
 
   // horizontal (left/right)
-  int ch1 = readValue(CHANNEL_1_PORT);
+  int channel1 = readValue(CHANNEL_1_PORT);
   // horizontal movement (forward/backward)
-  int ch2 = readValue(CHANNEL_2_PORT);
+  int channel2 = readValue(CHANNEL_2_PORT);
   // vertical movement (thrust -> up/down)
-  int ch3 = readValue(CHANNEL_3_PORT);
+  int channel3 = readValue(CHANNEL_3_PORT);
   // rotation own axis
-  int ch4 = readValue(CHANNEL_4_PORT);
+  int channel4 = readValue(CHANNEL_4_PORT);
 
   ValueSet values = {
-    getThrustInPercent(ch3),
-    getMovementForwardBackwardInPercent(ch2),
-    getMovementLeftRightInPercent(ch1),
-    getRotationLeftRightInPercent(ch4)
+    getThrustInPercent(channel3),
+    getMovementForwardBackwardInPercent(channel2),
+    getMovementLeftRightInPercent(channel1),
+    getRotationLeftRightInPercent(channel4)
   };
 
-  logValue(values.thrust, "Thrust", ch3);
-  logValue(values.rotation_l_r, "Rotation (left/right)", ch4);
-  logValue(values.movement_l_r, "Movement (left/right)", ch1);
-  logValue(values.movement_f_b, "Movement (forward/backward)", ch2);
+  logValue(values.thrust, "Thrust", channel3);
+  logValue(values.rotation_l_r, "Rotation (left/right)", channel4);
+  logValue(values.movement_l_r, "Movement (left/right)", channel1);
+  logValue(values.movement_f_b, "Movement (forward/backward)", channel2);
 
   writeThrustIffNew(values.thrust);
 
-  unsigned long tick_duration = millis() - tick_start_time;
+  unsigned long tickDuration = millis() - tickStartTime;
 
 #ifdef VERBOSE
   Serial.print("Tick took ");
-  Serial.print(tick_duration);
+  Serial.print(tickDuration);
   Serial.println("ms");
 #endif // VERBOSE
 
   // sleep for as long as we need to have a consistent tick time of ROUGH_TICK_TIME ms.
 
   // if we already took ROUGH_TICK_TIME ms(which should never happen lol), we abort asafp
-  if (tick_duration >= ROUGH_TICK_TIME) {
+  if (tickDuration >= ROUGH_TICK_TIME) {
     Serial.println("[WARNING] Tick duration was higher than ROUGH_TICK_TIME!");
     Serial.println();
     return;
   } else {
     // only do cleanup tasks if we have some greater timespan to invest into.
-    bool cleanUpTaskWorth = (ROUGH_TICK_TIME - tick_duration) >= 50;
+    bool cleanUpTaskWorth = (ROUGH_TICK_TIME - tickDuration) >= 50;
 
     if (cleanUpTaskWorth) {
       Serial.println("Doing cleanup tasks.");
       // Cleanup tasks, they should not take too much time though
 #ifdef CLEANUP_BATTERY_CHECK
-      if (!pwrMgr->PowerSupplyIsOkay()) {
+      if (!power_manager->PowerSupplyIsOkay()) {
         shutdown();
         return;
       }
 #endif // CLEANUP_BATTERY_CHECK
 
       // tick_duration is lower than ROUGH_TICK_TIME now, thus recalculate it
-      unsigned long tick_duration = millis() - tick_start_time;
+      unsigned long tickDuration = millis() - tickStartTime;
 
       // check whether the cleanup task took too long
-      if (tick_duration >= ROUGH_TICK_TIME) {
+      if (tickDuration >= ROUGH_TICK_TIME) {
         Serial.println("[WARNING] \"Cleanup task\" took too much time!");
         Serial.println();
         return;
@@ -363,21 +360,21 @@ void loop() {
     }
 
     // calculate how much time we need to sleep now
-    unsigned long sleep_time = ROUGH_TICK_TIME - (millis() - tick_start_time);
+    unsigned long sleepTime = ROUGH_TICK_TIME - (millis() - tickStartTime);
 
     // ignore overflows/underflows
-    if (sleep_time <= 0 || sleep_time >= 1000) {
+    if (sleepTime <= 0 || sleepTime >= 1000) {
       Serial.println("[WARNING] Underflow or overflow detected!");
       return;
     }
 
 #ifdef VERBOSE
     Serial.print("Sleeping for ");
-    Serial.print(sleep_time);
+    Serial.print(sleepTime);
     Serial.println("ms… ");
 #endif // VERBOSE
 
-    delay(sleep_time);
+    delay(sleepTime);
 
 #ifdef VERBOSE
     Serial.println("Woked up");
