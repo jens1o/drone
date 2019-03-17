@@ -5,12 +5,6 @@
 // not commented out = debug mode
 #define VERBOSE
 
-//#define CLEANUP_BATTERY_CHECK
-
-#ifdef CLEANUP_BATTERY_CHECK
-#define CLEANUP_BATTERY_CHECK_PORT 6
-#endif // CLEANUP_BATTERY_CHECK
-
 #define PERCENT_TOP 100
 #define PERCENT_LOW 0
 // MUST NOT be too less, otherwise we will get weird values
@@ -37,75 +31,11 @@
 #define ROTOR_2_MIN_STRENGTH 990 // (60)
 #define ROTOR_2_MAX_STRENGTH 2846
 
-#ifdef CLEANUP_BATTERY_CHECK
-// This class provides functions for checking whether we have enough electrical power,
-// and avoid (permanently) harming the battery if it is going to be empty soon.
-class PowerManager
-{
-  private:
-    float voltage_value_;
-    unsigned long last_battery_check_ = 0;
+#define ROTOR_3_MIN_STRENGTH 900 // (60)
+#define ROTOR_3_MAX_STRENGTH 2756
 
-  public:
-    // This gets called once this instance is created
-    PowerManager(void) {
-      // read voltage upon creation to avoid having an empty cache
-      this->ReadVoltage();
-    }
-
-    // Reads and converts the raw value from the power supply and stores
-    // it(can be recieved by `GetVoltage()`).
-    virtual void ReadVoltage()
-    {
-      this->last_battery_check_ = millis();
-#ifdef VERBOSE
-      Serial.println("Reading new voltage value from power supply!");
-#endif // VERBOSE
-
-      int rawValue = analogRead(CLEANUP_BATTERY_CHECK_PORT);
-
-      this->voltage_value_ = rawValue * (5.00 / 1023.00) * 2;
-#ifdef VERBOSE
-      Serial.print("Battery voltage: ");
-      Serial.print(this->voltage_value_);
-      Serial.println("V");
-#endif // VERBOSE
-    }
-
-    // Checks whether the value hold in cache is still up to date
-    // (avoiding a persistent leak of time)
-    virtual void MaybeRefreshCache()
-    {
-      // check whether the last read was (at least) 30 seconds ago
-      bool shouldRefreshCache = ((millis() - this->last_battery_check_) >= 30 * 1000);
-
-      if (shouldRefreshCache) {
-        // update cache by reading the value and save it
-        this->ReadVoltage();
-      }
-    }
-
-    virtual float GetVoltage()
-    {
-      // check whether we need to read the voltage again because of new conditions
-      this->MaybeRefreshCache();
-
-      return this->voltage_value_;
-    }
-
-    virtual bool PowerSupplyIsOkay()
-    {
-      float voltageValue = this->GetVoltage();
-
-      if (voltageValue <= 6.50) {
-        Serial.println("[WARNING] Power supply is too low!");
-        return false; // TODO: Change to false in production
-      }
-
-      return true;
-    }
-};
-#endif // CLEANUP_BATTERY_CHECK
+#define ROTOR_4_MIN_STRENGTH 900 // (60)
+#define ROTOR_4_MAX_STRENGTH 2756
 
 struct ValueSet
 {
@@ -114,10 +44,6 @@ struct ValueSet
   int movement_l_r;
   int rotation_l_r;
 };
-
-#ifdef CLEANUP_BATTERY_CHECK
-PowerManager *power_manager;
-#endif // CLEANUP_BATTERY_CHECK
 
 unsigned long start_time;
 
@@ -130,7 +56,7 @@ int const INPUT_PORTS[] = {RANDOM_SEED_PORT, CHANNEL_1_PORT, CHANNEL_2_PORT, CHA
 
 bool is_shutdown = false;
 
-Servo rotor_1, rotor_2;
+Servo rotor_1, rotor_2, rotor_3, rotor_4;
 
 // This is the entry point for our program.
 // This method is being called by the bootloader after its usual boot-up stuff
@@ -153,17 +79,8 @@ void setup() {
   // Set output pins
   rotor_1.attach(ROTOR_1_PORT, ROTOR_1_MIN_STRENGTH, ROTOR_1_MAX_STRENGTH);
   rotor_2.attach(ROTOR_2_PORT, ROTOR_2_MIN_STRENGTH, ROTOR_2_MAX_STRENGTH);
-
-#ifdef CLEANUP_BATTERY_CHECK
-  power_manager = new PowerManager();
-
-  if (!power_manager->PowerSupplyIsOkay()) {
-    shutdown();
-    return;
-  }
-#else
-  Serial.println("[NOTICE] Power Supply check is turned off!");
-#endif // CLEANUP_BATTERY_CHECK
+  rotor_3.attach(ROTOR_3_PORT, ROTOR_3_MIN_STRENGTH, ROTOR_3_MAX_STRENGTH);
+  rotor_4.attach(ROTOR_4_PORT, ROTOR_4_MIN_STRENGTH, ROTOR_4_MAX_STRENGTH);
 
   Serial.print("Successfully booted up. Startup took ");
   Serial.print(millis() - start_time);
@@ -179,9 +96,11 @@ void shutdown() {
   // mark program as shut down
   is_shutdown = true;
 
-  // Shutdown the servos
+  // Shutdown the rotors
   rotor_1.write(0);
   rotor_2.write(0);
+  rotor_3.write(0);
+  rotor_4.write(0);
 
   Serial.println("[EMERGENCY] Shutdown!");
 }
@@ -279,6 +198,8 @@ void writeThrustIffNew(int thrustValue) {
 
   rotor_1.write(thrustValue);
   rotor_2.write(thrustValue);
+  rotor_3.write(thrustValue);
+  rotor_4.write(thrustValue);
 }
 
 void loop() {
@@ -335,12 +256,8 @@ void loop() {
     if (cleanUpTaskWorth) {
       Serial.println("Doing cleanup tasks.");
       // Cleanup tasks, they should not take too much time though
-#ifdef CLEANUP_BATTERY_CHECK
-      if (!power_manager->PowerSupplyIsOkay()) {
-        shutdown();
-        return;
-      }
-#endif // CLEANUP_BATTERY_CHECK
+
+      // TODO: Add cleanup tasks
 
       // tick_duration is lower than ROUGH_TICK_TIME now, thus recalculate it
       unsigned long tickDuration = millis() - tickStartTime;
