@@ -50,8 +50,12 @@ unsigned long start_time;
 int last_thrust_value = 0;
 
 int const INPUT_PORTS[] = {RANDOM_SEED_PORT, CHANNEL_1_PORT, CHANNEL_2_PORT, CHANNEL_3_PORT, CHANNEL_4_PORT};
-// in the arduino world, there is no reliable way of knowing how long an array is, thus computing this at compile time!
+// in the arduino world, there is no reliable way of knowing how long an array is, thus computing this at compile time
 #define kInputPortLength (sizeof(INPUT_PORTS)/sizeof(int))
+
+int const OUTPUT_PORTS[] = {ROTOR_1_PORT, ROTOR_2_PORT, ROTOR_3_PORT, ROTOR_4_PORT};
+// in the arduino world, there is no reliable way of knowing how long an array is, thus computing this at compile time
+#define kOutputPortLength (sizeof(OUTPUT_PORTS)/sizeof(int))
 
 
 bool is_shutdown = false;
@@ -68,6 +72,11 @@ void setup() {
   // Initalize input pins for reading values from them
   for (int i = 0; i < kInputPortLength; i++) {
     pinMode(INPUT_PORTS[i], INPUT);
+  }
+
+  // Initalize output pins for sending values to them
+  for (int i = 0; i < kOutputPortLength; i++) {
+    pinMode(OUTPUT_PORTS[i], OUTPUT);
   }
 
   // seed the (pseudo-)random number generator asap on an **unconnected** pin
