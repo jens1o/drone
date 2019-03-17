@@ -5,7 +5,7 @@
 // not commented out = debug mode
 #define VERBOSE
 
-#define CLEANUP_BATTERY_CHECK
+//#define CLEANUP_BATTERY_CHECK
 
 #ifdef CLEANUP_BATTERY_CHECK
 #define CLEANUP_BATTERY_CHECK_PORT 6
@@ -32,10 +32,10 @@
 #define CHANNEL_4_PORT 6
 
 #define ROTOR_1_MIN_STRENGTH 900 // (60)
-#define ROTOR_1_MAX_STRENGTH 2400
+#define ROTOR_1_MAX_STRENGTH 2756
 
 #define ROTOR_2_MIN_STRENGTH 990 // (60)
-#define ROTOR_2_MAX_STRENGTH 2500
+#define ROTOR_2_MAX_STRENGTH 2846
 
 #ifdef CLEANUP_BATTERY_CHECK
 // This class provides functions for checking whether we have enough electrical power,
