@@ -125,7 +125,7 @@ unsigned long readValue(int channel_id) {
 }
 
 unsigned char getThrustInPercent(unsigned long rawValue) {
-  unsigned long mappedValue = map(rawValue, 1040, 1874, PERCENT_LOW, PERCENT_TOP);
+  unsigned long mappedValue = map(rawValue, 1025, 1874, PERCENT_LOW, PERCENT_TOP);
 
   return min(mappedValue, 100);
 }
