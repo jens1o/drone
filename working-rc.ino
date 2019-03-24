@@ -25,17 +25,19 @@
 #define CHANNEL_3_PORT 7
 #define CHANNEL_4_PORT 6
 
+// The delta between the *_MIN_STRENGTH and *_MAX_STRENGTH should be 1856(as given by the Servo doc).
+
 #define ROTOR_1_MIN_STRENGTH 900 // (60)
 #define ROTOR_1_MAX_STRENGTH 2756
 
-#define ROTOR_2_MIN_STRENGTH 990 // (60)
-#define ROTOR_2_MAX_STRENGTH 2846
+#define ROTOR_2_MIN_STRENGTH 970 // (60)
+#define ROTOR_2_MAX_STRENGTH 2826
 
 #define ROTOR_3_MIN_STRENGTH 900 // (60)
 #define ROTOR_3_MAX_STRENGTH 2756
 
-#define ROTOR_4_MIN_STRENGTH 900 // (60)
-#define ROTOR_4_MAX_STRENGTH 2756
+#define ROTOR_4_MIN_STRENGTH 860 // (60)
+#define ROTOR_4_MAX_STRENGTH 2716
 
 struct ValueSet
 {
@@ -164,7 +166,7 @@ int getMovementLeftRightInPercent(unsigned long rawValue) {
 // 50% -> steady
 // 100% -> right
 int getRotationLeftRightInPercent(unsigned long rawValue) {
-  unsigned long mappedValue= map(rawValue, 1098, 1872, PERCENT_LOW, PERCENT_TOP);
+  unsigned long mappedValue = map(rawValue, 1098, 1872, PERCENT_LOW, PERCENT_TOP);
 
   return min(maybeSnapNeutral(mappedValue), 100);
 }
