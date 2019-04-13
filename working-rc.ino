@@ -1,9 +1,16 @@
+#include<MPU6050.h>
 #include<Servo.h>
 
 // Defines whether there is verbose logging on the Serial Monitor
 // commented out = production
 // not commented out = debug mode
 #define VERBOSE
+
+//#define CLEANUP_BATTERY_CHECK
+
+#define CLEANUP_BATTERY_CHECK_PORT A0
+
+#define CLEANUP_BATTERY_CHECK
 
 #define PERCENT_TOP 100
 #define PERCENT_LOW 0
@@ -39,12 +46,12 @@
 #define ROTOR_4_MIN_STRENGTH 860 // (60)
 #define ROTOR_4_MAX_STRENGTH 2716
 
-struct ValueSet
+struct RawValueSet
 {
-  int thrust;
-  int movement_f_b;
-  int movement_l_r;
-  int rotation_l_r;
+  unsigned long thrust;
+  unsigned long movement_f_b;
+  unsigned long movement_l_r;
+  unsigned long rotation_l_r;
 };
 
 unsigned long start_time;
@@ -60,9 +67,217 @@ int const OUTPUT_PORTS[] = {ROTOR_1_PORT, ROTOR_2_PORT, ROTOR_3_PORT, ROTOR_4_PO
 #define kOutputPortLength (sizeof(OUTPUT_PORTS)/sizeof(int))
 
 
+
 bool is_shutdown = false;
 
 Servo rotor_1, rotor_2, rotor_3, rotor_4;
+
+// Marks this program as shut down, shuts down the servo.
+// Please note that does *NOT* actually terminate the program
+// (as it is impossible to turn an Arduino off by itself)!
+void shutdown() {
+  // mark program as shut down
+  is_shutdown = true;
+
+  // Shutdown the rotors
+  rotor_1.write(0);
+  rotor_2.write(0);
+  rotor_3.write(0);
+  rotor_4.write(0);
+
+
+  Serial.println("[EMERGENCY] Shutdown!");
+}
+
+class FlightController
+{
+  private:
+    byte _relative_1 = 0;
+    byte _relative_2 = 0;
+    byte _relative_3 = 0;
+    byte _relative_4 = 0;
+    byte _relative_thrust = 0;
+    byte _relative_movement_f_b = 0;
+    byte _relative_movement_l_r = 0;
+    byte _relative_rotation_l_r = 0;
+    Servo _servo_1;
+    Servo _servo_2;
+    Servo _servo_3;
+    Servo _servo_4;
+
+    // Snaps and return the value of 50 if it is inside a range
+    // that is considered to ease behavior (rounding errors, minor differences
+    // from remote control and known range).
+    // Otherwise returns given value.
+    virtual int maybeSnapNeutral(int value) {
+      // mark everything 45..=54 as 50
+      if (value >= 45 && value <= 54) {
+        return 50;
+      }
+
+      return value;
+    }
+
+    virtual byte getRelativeThrust(unsigned long rawThrust) {
+      unsigned long mappedValue = map(rawThrust, 1025, 1874, PERCENT_LOW, PERCENT_TOP);
+
+      return min(mappedValue, 100);
+    }
+
+    // This function extracts the value like this:
+    // 0% -> backwards
+    // 50% -> steady
+    // 100% -> forwards
+    virtual byte getRelativeMovementForwardBackward(unsigned long rawMFB) {
+      unsigned long mappedValue = map(rawMFB, 1132, 1914, PERCENT_LOW, PERCENT_TOP);
+
+      return min(maybeSnapNeutral(mappedValue), 100);
+    }
+
+    // This function extracts the value like this:
+    // 0% -> left
+    // 50% -> steady
+    // 100% -> right
+    virtual byte getRelativeMovementLeftRight(unsigned long rawMLR) {
+      unsigned long mappedValue = map(rawMLR, 1128, 1887, PERCENT_LOW, PERCENT_TOP);
+
+      return min(maybeSnapNeutral(mappedValue), 100);
+    }
+
+
+    // This function extracts the value like this:
+    // 0% -> left
+    // 50% -> steady
+    // 100% -> right
+    virtual byte getRotationLeftRightInPercent(unsigned long rawRLR) {
+      unsigned long mappedValue = map(rawRLR, 1098, 1872, PERCENT_LOW, PERCENT_TOP);
+
+      return min(maybeSnapNeutral(mappedValue), 100);
+    }
+
+  public:
+    FlightController(Servo servo1, Servo servo2, Servo servo3, Servo servo4) {
+      if
+      (
+        !servo1.attached() ||
+        !servo2.attached() ||
+        !servo3.attached() ||
+        !servo4.attached()
+      )
+      {
+        Serial.println("[EMERGENCY] [FlightController] At least one servo is not attached yet, but FlightController expects attached ones!");
+        ::shutdown();
+        return;
+      }
+
+      this->_servo_1 = servo1;
+      this->_servo_2 = servo2;
+      this->_servo_3 = servo3;
+      this->_servo_4 = servo4;
+    }
+
+    virtual void updateState(RawValueSet raw_state) {
+      this->_relative_thrust = this->getRelativeThrust(raw_state.thrust);
+      this->_relative_movement_f_b = this->getRelativeMovementForwardBackward(raw_state.movement_f_b);
+      this->_relative_movement_l_r = this->getRelativeMovementLeftRight(raw_state.movement_l_r);
+      this->_relative_rotation_l_r = this->getRotationLeftRightInPercent(raw_state.rotation_l_r);
+
+
+    }
+
+    virtual void shutdown() {
+
+    }
+
+    // Writes the respective data to all rotors
+    virtual void commit() {
+      // TODO
+      Serial.println("Writing data to rotors");
+      this->_servo_1.write(this->_relative_thrust);
+      this->_servo_2.write(this->_relative_thrust);
+      this->_servo_3.write(this->_relative_thrust);
+      this->_servo_4.write(this->_relative_thrust);
+    }
+};
+
+#ifdef CLEANUP_BATTERY_CHECK
+// This class provides functions for checking whether we have enough electrical power,
+// and avoid (permanently) harming the battery if it is going to be empty soon.
+class PowerManager
+{
+  private:
+    float voltage_value_;
+    unsigned long last_battery_check_ = 0;
+
+  public:
+    // This gets called once this instance is created
+    PowerManager(void) {
+      // read voltage upon creation to avoid having an empty cache
+      this->ReadVoltage();
+    }
+
+    // Reads and converts the raw value from the power supply and stores
+    // it(can be recieved by `GetVoltage()`).
+    virtual void ReadVoltage()
+    {
+      this->last_battery_check_ = millis();
+      Serial.println("[INFO] [PowerManager] Reading new voltage value from power supply!");
+
+      int rawValue = analogRead(CLEANUP_BATTERY_CHECK_PORT);
+
+      this->voltage_value_ = rawValue * (5.00 / 1023.00) * 2;
+#ifdef VERBOSE
+      Serial.print("[INFO] [PowerManager] Battery voltage: ");
+      Serial.print(this->voltage_value_);
+      Serial.println("V");
+#endif // VERBOSE
+    }
+
+    // Checks whether the value hold in cache is still up to date
+    // (avoiding a persistent leak of time)
+    virtual void MaybeUpdateCache()
+    {
+      // check whether the last read was (at least) 10 seconds ago
+      bool shouldUpdateCache = ((millis() - this->last_battery_check_) >= 10 * 1000);
+
+      if (shouldUpdateCache) {
+        // update cache by reading the value and save it
+        this->ReadVoltage();
+      }
+    }
+
+    virtual float GetPowerSupplyVoltage()
+    {
+      // check whether we need to read the voltage again because of new conditions
+      this->MaybeUpdateCache();
+
+      return this->voltage_value_;
+    }
+
+    // Checks whether the power supply has enough power left over by checking whether
+    // the voltage of it is high enough to further allow draining it.
+    // Please check that each call
+    virtual bool PowerSupplyIsOkay()
+    {
+      float voltageValue = this->GetPowerSupplyVoltage();
+
+      // value is hardcoded to avoid an easy switch.
+      // Any change here could damage the battery irrevocable and lead to fire.
+      // By no means ignore this, Jens. Play safe. Be safe.
+      // The value MUST include a safety buffer, just to play safe.
+      if (voltageValue <= 6.80) {
+        Serial.println("[EMERGENCY] [PowerManager] Power supply is too low!");
+        return false; // TODO: Make sure this is set to false in production!
+      }
+
+      return true;
+    }
+};
+#endif // CLEANUP_BATTERY_CHECK
+
+FlightController* flight_controller;
+PowerManager* power_mgr;
+
 
 // This is the entry point for our program.
 // This method is being called by the bootloader after its usual boot-up stuff
@@ -87,46 +302,27 @@ void setup() {
   // Connect to a (potential) computer for outputting debug information on baud 9600
   Serial.begin(9600);
 
+  // Init PowerManager and execute an immediate scan whether we are alright to fly
+  // in the sky!
+  power_mgr = new PowerManager();
+  if (!power_mgr->PowerSupplyIsOkay()) {
+    shutdown();
+    return;
+  }
+
   // Set output pins
   rotor_1.attach(ROTOR_1_PORT, ROTOR_1_MIN_STRENGTH, ROTOR_1_MAX_STRENGTH);
   rotor_2.attach(ROTOR_2_PORT, ROTOR_2_MIN_STRENGTH, ROTOR_2_MAX_STRENGTH);
   rotor_3.attach(ROTOR_3_PORT, ROTOR_3_MIN_STRENGTH, ROTOR_3_MAX_STRENGTH);
   rotor_4.attach(ROTOR_4_PORT, ROTOR_4_MIN_STRENGTH, ROTOR_4_MAX_STRENGTH);
 
+  flight_controller = new FlightController(rotor_1, rotor_2, rotor_3, rotor_4);
+
   Serial.print("Successfully booted up. Startup took ");
   Serial.print(millis() - start_time);
   Serial.println("ms");
-
+  
   // arduino bootloader now starts with calling loop() over and over again as soon as we return
-}
-
-// Marks this program as shut down, shuts down the servo.
-// Please note that does *NOT* actually terminate the program
-// (as it is impossible to turn an Arduino off by itself)!
-void shutdown() {
-  // mark program as shut down
-  is_shutdown = true;
-
-  // Shutdown the rotors
-  rotor_1.write(0);
-  rotor_2.write(0);
-  rotor_3.write(0);
-  rotor_4.write(0);
-
-  Serial.println("[EMERGENCY] Shutdown!");
-}
-
-// Snaps and return the value of 50 if it is inside a range
-// that is considered to ease behavior (rounding errors, minor differences
-// from remote control and known range).
-// Otherwise returns given value.
-int maybeSnapNeutral(int value) {
-  // mark everything 45..=54 as 50
-  if (value >= 45 && value <= 54) {
-    return 50;
-  }
-
-  return value;
 }
 
 // Reads and returns a raw PWM(pulse-width modulation) value from the given `channel_id` (i.e. the output port a cable
@@ -134,43 +330,6 @@ int maybeSnapNeutral(int value) {
 unsigned long readValue(int channel_id) {
   return pulseIn(channel_id, HIGH, PULSE_IN_TIMEOUT);
 }
-
-unsigned char getThrustInPercent(unsigned long rawValue) {
-  unsigned long mappedValue = map(rawValue, 1025, 1874, PERCENT_LOW, PERCENT_TOP);
-
-  return min(mappedValue, 100);
-}
-
-// This function extracts the value like this:
-// 0% -> backwards
-// 50% -> steady
-// 100% -> forwards
-int getMovementForwardBackwardInPercent(unsigned long rawValue) {
-  unsigned long mappedValue = map(rawValue, 1132, 1914, PERCENT_LOW, PERCENT_TOP);
-
-  return min(maybeSnapNeutral(mappedValue), 100);
-}
-
-// This function extracts the value like this:
-// 0% -> left
-// 50% -> steady
-// 100% -> right
-int getMovementLeftRightInPercent(unsigned long rawValue) {
-  unsigned long mappedValue = map(rawValue, 1128, 1887, PERCENT_LOW, PERCENT_TOP);
-
-  return min(maybeSnapNeutral(mappedValue), 100);
-}
-
-// This function extracts the value like this:
-// 0% -> left
-// 50% -> steady
-// 100% -> right
-int getRotationLeftRightInPercent(unsigned long rawValue) {
-  unsigned long mappedValue = map(rawValue, 1098, 1872, PERCENT_LOW, PERCENT_TOP);
-
-  return min(maybeSnapNeutral(mappedValue), 100);
-}
-
 
 // Helper utility function to avoid clutter-code in the main function
 // that logs:
@@ -231,11 +390,11 @@ void loop() {
   // rotation own axis
   int channel4 = readValue(CHANNEL_4_PORT);
 
-  ValueSet values = {
-    getThrustInPercent(channel3),
-    getMovementForwardBackwardInPercent(channel2),
-    getMovementLeftRightInPercent(channel1),
-    getRotationLeftRightInPercent(channel4)
+  RawValueSet values = {
+    channel3,
+    channel2,
+    channel1,
+    channel4
   };
 
   logValue(values.thrust, "Thrust", channel3);
@@ -243,7 +402,10 @@ void loop() {
   logValue(values.movement_l_r, "Movement (left/right)", channel1);
   logValue(values.movement_f_b, "Movement (forward/backward)", channel2);
 
-  writeThrustIffNew(values.thrust);
+  //writeThrustIffNew(values.thrust);
+
+  flight_controller->updateState(values);
+  flight_controller->commit();
 
   unsigned long tickDuration = millis() - tickStartTime;
 
@@ -267,6 +429,13 @@ void loop() {
     if (cleanUpTaskWorth) {
       Serial.println("Doing cleanup tasks.");
       // Cleanup tasks, they should not take too much time though
+
+#ifdef CLEANUP_BATTERY_CHECK
+      if (!power_mgr->PowerSupplyIsOkay()) {
+        shutdown();
+        return;
+      }
+#endif // CLEANUP_BATTERY_CHECK
 
       // TODO: Add cleanup tasks
 
