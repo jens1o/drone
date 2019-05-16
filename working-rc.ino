@@ -580,16 +580,16 @@ class Main {
       this->_flight_controller->UpdateState(this->_remote_control_manager->GetValues(), this->_acceleration_controller->GetSensorResults());
       this->_flight_controller->Commit();
 
-      Serial.print("[INFO] [Main] Tick took ");
-      Serial.print(millis() - tickStartTime);
-      Serial.println("ms");
-
       // tick_duration is lower than ROUGH_TICK_TIME now, thus recalculate it
       unsigned long tickDuration = millis() - tickStartTime;
 
+      Serial.print("[INFO] [Main] Tick took ");
+      Serial.print(tickDuration);
+      Serial.println("ms");
+
       // check whether the cleanup task took too long
       if (tickDuration >= ROUGH_TICK_TIME) {
-        Serial.println("[WARNING] \"Cleanup task\" took too much time!");
+        Serial.println("[WARNING] Tick took too much time!");
         Serial.println();
         return;
       }
