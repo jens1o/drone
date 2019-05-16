@@ -6,6 +6,7 @@
 // not commented out = debug mode
 #define VERBOSE
 
+// #define CLEANUP_BATTERY_CHECK
 #define CLEANUP_BATTERY_CHECK_PORT A0
 
 #define PERCENT_TOP 100
@@ -28,19 +29,26 @@
 #define CHANNEL_3_PORT 7
 #define CHANNEL_4_PORT 8
 
+#define LEFT 0
+#define RIGHT 1
+
 // The delta between the *_MIN_STRENGTH and *_MAX_STRENGTH should be 1856(as given by the Servo doc).
 
 #define ROTOR_1_MIN_STRENGTH 900 // (60)
 #define ROTOR_1_MAX_STRENGTH 2756
+#define ROTOR_1_DIRECTION RIGHT
 
 #define ROTOR_2_MIN_STRENGTH 970 // (60)
 #define ROTOR_2_MAX_STRENGTH 2826
+#define ROTOR_2_DIRECTION LEFT
 
 #define ROTOR_3_MIN_STRENGTH 900 // (60)
 #define ROTOR_3_MAX_STRENGTH 2756
+#define ROTOR_3_DIRECTION RIGHT
 
 #define ROTOR_4_MIN_STRENGTH 860 // (60)
 #define ROTOR_4_MAX_STRENGTH 2716
+#define ROTOR_4_DIRECTION LEFT
 
 #define FREQ 250   // Sampling frequency
 #define SSF_GYRO 65.5  // Sensitivity Scale Factor of the gyrometer from the datasheet
@@ -85,8 +93,8 @@ struct AccelerometerResults
   */
   float measures[3] = {0, 0, 0};
   // Calculated angles from gyro's values in that order: X, Y, Z
-  float gyro_angle[3]  = {0,0,0};
-    // Total 3D acceleration vector in m/s²
+  float gyro_angle[3]  = {0, 0, 0};
+  // Total 3D acceleration vector in m/s²
   long acc_total_vector;
 };
 
@@ -157,9 +165,16 @@ class AccelerationController
     }
 
     void CalibrateSensor() {
-      int max_samples = 2000;
+      const int max_samples = 1000;
+      Serial.println("[INFO] [AccelerationController] Calibrating, may take a long time.");
+      Serial.print("[INFO] [AccelerationController] ");
 
-      for (int i = 0; i < max_samples; i++) {
+      for (int i = 1; i <= max_samples; i++) {
+        if ((i % 100) == 0) {
+          Serial.print(i);
+          Serial.print("… ");
+        }
+
         AccelerometerMeasurements results = this->ReadRawData();
 
         this->_gyro_offset[X] += results.gyro_raw[X];
@@ -167,8 +182,10 @@ class AccelerationController
         this->_gyro_offset[Z] += results.gyro_raw[Z];
 
         // Just wait a bit before next loop iteration
-        delay(3);
+        delay(1);
       }
+
+      Serial.println();
 
       // Calculate average offsets
       this->_gyro_offset[X] /= max_samples;
@@ -210,7 +227,7 @@ class AccelerationController
       struct AccelerometerResults results;
 
       // Calculate acceleration angles
-      
+
       // Calculated angles from accelerometer's values [in degrees] in that order: X, Y, Z
       float acc_angle[3] = {0, 0, 0};
 
@@ -260,6 +277,15 @@ class AccelerationController
 
     AccelerometerResults GetSensorResults() {
       _last_results = this->CalculateAngels(this->NormalizeRawData(this->ReadRawData()));
+
+      Serial.print("[DEBUG] [AccelerationController] X: ");
+      Serial.print(_last_results.gyro_angle[X]);
+
+      Serial.print(" Y: ");
+      Serial.print(_last_results.gyro_angle[Y]);
+
+      Serial.print(" Z: ");
+      Serial.println(_last_results.gyro_angle[Z]);
 
       return _last_results;
     }
@@ -351,6 +377,8 @@ class FlightController
       this->_servo_2 = servo2;
       this->_servo_3 = servo3;
       this->_servo_4 = servo4;
+
+      Serial.println("[INFO] [FlightController] Initalized.");
     }
 
     virtual bool initSuccessful() {
@@ -362,7 +390,7 @@ class FlightController
       this->_relative_movement_f_b = this->getRelativeMovementForwardBackward(raw_state.movement_f_b);
       this->_relative_movement_l_r = this->getRelativeMovementLeftRight(raw_state.movement_l_r);
       this->_relative_rotation_l_r = this->getRotationLeftRightInPercent(raw_state.rotation_l_r);
-      
+
     }
 
     virtual void Shutdown() {
@@ -375,7 +403,8 @@ class FlightController
     // Writes the respective data to all rotors
     virtual void Commit() {
       // TODO
-      Serial.println("Writing data to rotors");
+      Serial.print("Writing data to rotors. Thrust: ");
+      Serial.println(this->_relative_thrust);
       this->_servo_1.write(this->_relative_thrust);
       this->_servo_2.write(this->_relative_thrust);
       this->_servo_3.write(this->_relative_thrust);
@@ -472,6 +501,8 @@ class RemoteControlManager
   public:
     // Reads the values
     void Update() {
+      Serial.println("[INFO] [RemoteControlManager] Reading new values from Remote Control.");
+
       // horizontal (left/right)
       int channel1 = this->_readValue(CHANNEL_1_PORT);
       // horizontal movement (forward/backward)
@@ -489,6 +520,8 @@ class RemoteControlManager
       };
 
       // TODO: Log values
+      Serial.print("Thrust value: ");
+      Serial.println(values.thrust);
 
       this->_values = values;
     }
@@ -537,7 +570,9 @@ class Main {
       unsigned long tickStartTime = millis();
 
       if (!this->_power_manager->PowerSupplyIsOkay()) {
+#ifdef CLEANUP_BATTERY_CHECK
         this->Shutdown();
+#endif
       }
 
       this->_remote_control_manager->Update();
@@ -548,6 +583,39 @@ class Main {
       Serial.print("[INFO] [Main] Tick took ");
       Serial.print(millis() - tickStartTime);
       Serial.println("ms");
+
+      // tick_duration is lower than ROUGH_TICK_TIME now, thus recalculate it
+      unsigned long tickDuration = millis() - tickStartTime;
+
+      // check whether the cleanup task took too long
+      if (tickDuration >= ROUGH_TICK_TIME) {
+        Serial.println("[WARNING] \"Cleanup task\" took too much time!");
+        Serial.println();
+        return;
+      }
+
+      // calculate how much time we need to sleep now
+      unsigned long sleepTime = ROUGH_TICK_TIME - (millis() - tickStartTime);
+
+      // ignore overflows/underflows
+      if (sleepTime <= 0 || sleepTime >= 1000) {
+        Serial.println("[WARNING] Underflow or overflow detected!");
+        return;
+      }
+
+#ifdef VERBOSE
+      Serial.print("Sleeping for ");
+      Serial.print(sleepTime);
+      Serial.println("ms… ");
+#endif // VERBOSE
+
+      delay(sleepTime);
+
+#ifdef VERBOSE
+      Serial.println("Woked up");
+#endif // VERBOSE
+
+      Serial.println(); // make some room for the next output season
     }
 
     // Marks this program as shut down, shuts down the servo.
@@ -592,9 +660,12 @@ void setup() {
   // Init PowerManager and execute an immediate scan whether we are alright to fly
   // in the sky!
   PowerManager* power_mgr = new PowerManager();
+#ifdef CLEANUP_BATTERY_CHECK
   if (!power_mgr->PowerSupplyIsOkay()) {
+    Serial.println("[EMERGENCY] [setup()] Power supply too low!");
     _program_state = ProgramState::STOPPED;
   }
+#endif // CLEANUP_BATTERY_CHECK
 
   // Set output pins
   rotor_1.attach(ROTOR_1_PORT, ROTOR_1_MIN_STRENGTH, ROTOR_1_MAX_STRENGTH);
@@ -641,96 +712,6 @@ void logValue(unsigned long value, String name, unsigned long rawValue) {
 #endif // VERBOSE
 }
 
-// Writes the given thrust value to the rotors if and only if (iff) the value is new
-// (avoiding spamming them with time-consuming commands).
-void writeThrustIffNew(int thrustValue) {
-  if (thrustValue != last_thrust_value) {
-#ifdef VERBOSE
-    Serial.print("New thrust value: ");
-    Serial.println(thrustValue);
-#endif // VERBOSE
-    last_thrust_value = thrustValue;
-  } else {
-    // same thrust, nothing to do (saving time)
-    return;
-  }
-
-  rotor_1.write(thrustValue);
-  rotor_2.write(thrustValue);
-  rotor_3.write(thrustValue);
-  rotor_4.write(thrustValue);
-}
-
 void loop() {
   _main->Tick();
-
-  // TODO: Move to main
-  return;
-  /*
-    unsigned long tickDuration = millis() - tickStartTime;
-
-    #ifdef VERBOSE
-    Serial.print("Tick took ");
-    Serial.print(tickDuration);
-    Serial.println("ms");
-    #endif // VERBOSE
-
-    // sleep for as long as we need to have a consistent tick time of ROUGH_TICK_TIME ms.
-
-    // if we already took ROUGH_TICK_TIME ms(which should never happen lol), we abort asafp
-    if (tickDuration >= ROUGH_TICK_TIME) {
-      Serial.println("[WARNING] Tick duration was higher than ROUGH_TICK_TIME!");
-      Serial.println();
-      return;
-    } else {
-      // only do cleanup tasks if we have some greater timespan to invest into.
-      bool cleanUpTaskWorth = (ROUGH_TICK_TIME - tickDuration) >= 50;
-
-      if (cleanUpTaskWorth) {
-        Serial.println("Doing cleanup tasks.");
-        // Cleanup tasks, they should not take too much time though
-
-    #ifdef CLEANUP_BATTERY_CHECK
-        if (!power_mgr->PowerSupplyIsOkay()) {
-          shutdown();
-          return;
-        }
-    #endif // CLEANUP_BATTERY_CHECK
-
-        // TODO: Add cleanup tasks
-
-        // tick_duration is lower than ROUGH_TICK_TIME now, thus recalculate it
-        unsigned long tickDuration = millis() - tickStartTime;
-
-        // check whether the cleanup task took too long
-        if (tickDuration >= ROUGH_TICK_TIME) {
-          Serial.println("[WARNING] \"Cleanup task\" took too much time!");
-          Serial.println();
-          return;
-        }
-      }
-
-      // calculate how much time we need to sleep now
-      unsigned long sleepTime = ROUGH_TICK_TIME - (millis() - tickStartTime);
-
-      // ignore overflows/underflows
-      if (sleepTime <= 0 || sleepTime >= 1000) {
-        Serial.println("[WARNING] Underflow or overflow detected!");
-        return;
-      }
-
-    #ifdef VERBOSE
-      Serial.print("Sleeping for ");
-      Serial.print(sleepTime);
-      Serial.println("ms… ");
-    #endif // VERBOSE
-
-      delay(sleepTime);
-
-    #ifdef VERBOSE
-      Serial.println("Woked up");
-    #endif // VERBOSE
-
-      Serial.println(); // make some room for the next output season
-  */
 }
