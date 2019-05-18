@@ -114,6 +114,7 @@ Servo rotor_1, rotor_2, rotor_3, rotor_4;
 
 const int MPU_ADDRESS = 0x68;  // I2C address of the MPU-6050
 
+// Responsible for reading and calculating (useful) data from the MPU-6050
 class AccelerationController
 {
   private:
@@ -126,9 +127,9 @@ class AccelerationController
       unsigned long initStartTime = millis();
 
       Wire.begin();
-      Wire.beginTransmission(MPU_ADDRESS);
 
       // Wake up the MPU-6050 by setting the
+      Wire.beginTransmission(MPU_ADDRESS);
       Wire.write(0x6B); // PWR_MGMT_1
       Wire.write(0); // register to zero
       Wire.endTransmission();
@@ -155,7 +156,7 @@ class AccelerationController
       Wire.beginTransmission(MPU_ADDRESS);
       Wire.write(0x1A);                    // Request the CONFIG register
       Wire.write(0x03);                    // Set Digital Low Pass Filter about ~43Hz
-      Wire.endTransmission(); // End the transmission
+      Wire.endTransmission();              // End the transmission
 
       this->CalibrateSensor();
 
@@ -191,18 +192,22 @@ class AccelerationController
       this->_gyro_offset[X] /= max_samples;
       this->_gyro_offset[Y] /= max_samples;
       this->_gyro_offset[Z] /= max_samples;
+      
+      Serial.print("[INFO] [AccelerationController] Offsets: X: ");
+      Serial.print(this->_gyro_offset[X]);
+      Serial.print(" Y: ");
+      Serial.print(this->_gyro_offset[Y]);
+      Serial.print(" Z: ");
+      Serial.println(this->_gyro_offset[Z]);
     }
 
     AccelerometerMeasurements ReadRawData() {
       Wire.beginTransmission(MPU_ADDRESS); // Start communicating with the MPU-6050
       Wire.write(0x3B);                    // Send the requested starting register
       Wire.endTransmission();              // End the transmission
-      Wire.requestFrom(MPU_ADDRESS, 14);    // Request 14 bytes from the MPU-6050
+      Wire.requestFrom(MPU_ADDRESS, 14);   // Request 14 bytes from the MPU-6050
 
       struct AccelerometerMeasurements results;
-
-      // Wait until all the bytes are received
-      while (Wire.available() < 14);
 
       results.acc_raw[X]  = Wire.read() << 8 | Wire.read(); // Add the low and high byte to the acc_raw[X] variable
       results.acc_raw[Y]  = Wire.read() << 8 | Wire.read(); // Add the low and high byte to the acc_raw[Y] variable
@@ -231,7 +236,7 @@ class AccelerationController
       // Calculated angles from accelerometer's values [in degrees] in that order: X, Y, Z
       float acc_angle[3] = {0, 0, 0};
 
-      // Calculate total 3D acceleration vector : √(X² + Y² + Z²)
+      // Calculate total 3D acceleration vector: √(X² + Y² + Z²)
       results.acc_total_vector = sqrt(pow(measurements.acc_raw[X], 2) + pow(measurements.acc_raw[Y], 2) + pow(measurements.acc_raw[Z], 2));
 
       // To prevent asin to produce a NaN, make sure the input value is within [-1;+1]
@@ -279,13 +284,16 @@ class AccelerationController
       _last_results = this->CalculateAngels(this->NormalizeRawData(this->ReadRawData()));
 
       Serial.print("[DEBUG] [AccelerationController] X: ");
-      Serial.print(_last_results.gyro_angle[X]);
+      Serial.print(_last_results.acc_raw[X]);
 
       Serial.print(" Y: ");
-      Serial.print(_last_results.gyro_angle[Y]);
+      Serial.print(_last_results.acc_raw[Y]);
 
       Serial.print(" Z: ");
-      Serial.println(_last_results.gyro_angle[Z]);
+      Serial.println(_last_results.acc_raw[Z]);
+
+      Serial.print("[DEBUG] [AccelerationController] ");
+      Serial.println(_last_results.acc_total_vector);
 
       return _last_results;
     }
@@ -578,6 +586,9 @@ class Main {
       this->_remote_control_manager->Update();
 
       this->_flight_controller->UpdateState(this->_remote_control_manager->GetValues(), this->_acceleration_controller->GetSensorResults());
+
+      // TODO: Debug
+      return;
       this->_flight_controller->Commit();
 
       // tick_duration is lower than ROUGH_TICK_TIME now, thus recalculate it
