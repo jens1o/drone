@@ -1,5 +1,7 @@
 #include<Servo.h>
 #include<Wire.h>
+#include<I2Cdev.h>
+#include<MPU6050_6Axis_MotionApps20.h>
 
 // Defines whether there is verbose logging on the Serial Monitor
 // commented out = production
@@ -34,12 +36,12 @@
 
 // The delta between the *_MIN_STRENGTH and *_MAX_STRENGTH should be 1856(as given by the Servo doc).
 
-#define ROTOR_1_MIN_STRENGTH 900 // (60)
-#define ROTOR_1_MAX_STRENGTH 2756
+#define ROTOR_1_MIN_STRENGTH 1000 // (60)
+#define ROTOR_1_MAX_STRENGTH 2950
 #define ROTOR_1_DIRECTION RIGHT
 
-#define ROTOR_2_MIN_STRENGTH 970 // (60)
-#define ROTOR_2_MAX_STRENGTH 2826
+#define ROTOR_2_MIN_STRENGTH 950 // (60)
+#define ROTOR_2_MAX_STRENGTH 2806
 #define ROTOR_2_DIRECTION LEFT
 
 #define ROTOR_3_MIN_STRENGTH 900 // (60)
@@ -52,6 +54,7 @@
 
 #define FREQ 250   // Sampling frequency
 #define SSF_GYRO 65.5  // Sensitivity Scale Factor of the gyrometer from the datasheet
+#define GYRO_INTERRUPT_PIN 2  // use pin 2 on Arduino Uno & most boards
 
 #define X 0     // X axis
 #define Y 1     // Y axis
@@ -113,189 +116,85 @@ int const OUTPUT_PORTS[] = {ROTOR_1_PORT, ROTOR_2_PORT, ROTOR_3_PORT, ROTOR_4_PO
 Servo rotor_1, rotor_2, rotor_3, rotor_4;
 
 const int MPU_ADDRESS = 0x68;  // I2C address of the MPU-6050
+// DO NOT USE this variable outside of AccelerationController, it must be placed in the global scope as the Arduino programming language(Processing) is
+// unable to process static class variables …
+// do not leave out the `volatile`, as it is needed here(although heavily decreasing the abilities of the
+// optimizer)
+volatile bool __acc_controller_has_new_data = false;
 
 // Responsible for reading and calculating (useful) data from the MPU-6050
 class AccelerationController
 {
   private:
-    long _gyro_offset[3] = {0, 0, 0};
-    bool _has_init_values = false;
+    MPU6050 _mpu = new MPU6050(MPU_ADDRESS);
     AccelerometerResults _last_results;
+    bool _init_successful = true;
+    // holds received interrupt status byte
+    uint8_t _mpuInterruptStatus;
+    // count of all bytes currently in FIFO buffer
+    uint16_t _fifoCount;
+    uint8_t _mpuInterruptPacketSize;
+
+    static void _hasDataReadyCallback() {
+      __acc_controller_has_new_data = true;
+    }
 
   public:
     AccelerationController(void) {
       unsigned long initStartTime = millis();
 
+      // start listening
       Wire.begin();
+      // set I2C clock to 400 kHz
+      Wire.setClock(400000);
 
-      // Wake up the MPU-6050 by setting the
-      Wire.beginTransmission(MPU_ADDRESS);
-      Wire.write(0x6B); // PWR_MGMT_1
-      Wire.write(0); // register to zero
-      Wire.endTransmission();
+      this->_mpu.initialize();
 
-      // Configure power management
-      Wire.beginTransmission(MPU_ADDRESS);
-      Wire.write(0x6B);                    // Request the PWR_MGMT_1 register
-      Wire.write(0x00);                    // Apply the desired configuration to the register
-      Wire.endTransmission();              // End the transmission
+      // Test connection to verify it can work
+      if (!this->_mpu.testConnection()) {
+        _init_successful = false;
+        Serial.println("[EMERGENCY] [AccelerationController] MPU-6050 connection failed!");
+        return;
+      }
 
-      // Configure the gyro's sensitivity
-      Wire.beginTransmission(MPU_ADDRESS);
-      Wire.write(0x1B);                    // Request the GYRO_CONFIG register
-      Wire.write(0x08);                    // Apply the desired configuration to the register : ±500°/s
-      Wire.endTransmission();              // End the transmission
+      pinMode(GYRO_INTERRUPT_PIN, INPUT);
+      uint8_t deviceStatus = this->_mpu.dmpInitialize();
+      if (deviceStatus != 0) {
+        _init_successful = false;
+        Serial.println("[WARNING] [AccelerationController] Non-zero error code when initalizing MPU!");
+        return;
+      }
 
-      // Configure the acceleromter's sensitivity
-      Wire.beginTransmission(MPU_ADDRESS);
-      Wire.write(0x1C);                    // Request the ACCEL_CONFIG register
-      Wire.write(0x10);                    // Apply the desired configuration to the register : ±8g
-      Wire.endTransmission();              // End the transmission
+      // calibrated using a compass and try and error
+      this->_mpu.setXGyroOffset(220);
+      this->_mpu.setYGyroOffset(76);
+      this->_mpu.setZGyroOffset(-85);
+      this->_mpu.setZAccelOffset(1788);
 
-      // Configure low pass filter
-      Wire.beginTransmission(MPU_ADDRESS);
-      Wire.write(0x1A);                    // Request the CONFIG register
-      Wire.write(0x03);                    // Set Digital Low Pass Filter about ~43Hz
-      Wire.endTransmission();              // End the transmission
+      this->_mpu.setDMPEnabled(true);
 
-      this->CalibrateSensor();
+      // initalize interrupt for receiving continuous data
+      attachInterrupt(digitalPinToInterrupt(GYRO_INTERRUPT_PIN), _hasDataReadyCallback, RISING);
+      // remember error-code
+      this->_mpuInterruptStatus = this->_mpu.getIntStatus();
+      // save for later comparision
+      this->_mpuInterruptPacketSize = this->_mpu.dmpGetFIFOPacketSize();
 
-      Serial.print("[INFO] [AccelerationController] Initalizing took ");
+      Serial.print("[INFO] [AccelerationController] Initalized. Took ");
       Serial.print(millis() - initStartTime);
       Serial.println("ms");
     }
 
-    void CalibrateSensor() {
-      const int max_samples = 1000;
-      Serial.println("[INFO] [AccelerationController] Calibrating, may take a long time.");
-      Serial.print("[INFO] [AccelerationController] ");
-
-      for (int i = 1; i <= max_samples; i++) {
-        if ((i % 100) == 0) {
-          Serial.print(i);
-          Serial.print("… ");
-        }
-
-        AccelerometerMeasurements results = this->ReadRawData();
-
-        this->_gyro_offset[X] += results.gyro_raw[X];
-        this->_gyro_offset[Y] += results.gyro_raw[Y];
-        this->_gyro_offset[Z] += results.gyro_raw[Z];
-
-        // Just wait a bit before next loop iteration
-        delay(1);
-      }
-
-      Serial.println();
-
-      // Calculate average offsets
-      this->_gyro_offset[X] /= max_samples;
-      this->_gyro_offset[Y] /= max_samples;
-      this->_gyro_offset[Z] /= max_samples;
-      
-      Serial.print("[INFO] [AccelerationController] Offsets: X: ");
-      Serial.print(this->_gyro_offset[X]);
-      Serial.print(" Y: ");
-      Serial.print(this->_gyro_offset[Y]);
-      Serial.print(" Z: ");
-      Serial.println(this->_gyro_offset[Z]);
+    bool initSuccessful() {
+      return this->_init_successful;
     }
 
-    AccelerometerMeasurements ReadRawData() {
-      Wire.beginTransmission(MPU_ADDRESS); // Start communicating with the MPU-6050
-      Wire.write(0x3B);                    // Send the requested starting register
-      Wire.endTransmission();              // End the transmission
-      Wire.requestFrom(MPU_ADDRESS, 14);   // Request 14 bytes from the MPU-6050
+    void loop() {
+      // I miss you, exceptions.
+      if (!this->initSuccessful()) return;
 
-      struct AccelerometerMeasurements results;
+      // while (!__acc_controller_has_new_data &&
 
-      results.acc_raw[X]  = Wire.read() << 8 | Wire.read(); // Add the low and high byte to the acc_raw[X] variable
-      results.acc_raw[Y]  = Wire.read() << 8 | Wire.read(); // Add the low and high byte to the acc_raw[Y] variable
-      results.acc_raw[Z]  = Wire.read() << 8 | Wire.read(); // Add the low and high byte to the acc_raw[Z] variable
-      Wire.read(); Wire.read(); // ignore the two temperature registers
-      results.gyro_raw[X] = Wire.read() << 8 | Wire.read(); // Add the low and high byte to the gyro_raw[X] variable
-      results.gyro_raw[Y] = Wire.read() << 8 | Wire.read(); // Add the low and high byte to the gyro_raw[Y] variable
-      results.gyro_raw[Z] = Wire.read() << 8 | Wire.read(); // Add the low and high byte to the gyro_raw[Z] variable
-
-      return results;
-    }
-
-    AccelerometerMeasurements NormalizeRawData(AccelerometerMeasurements measurements) {
-      measurements.acc_raw[X] -= this->_gyro_offset[X];
-      measurements.acc_raw[Y] -= this->_gyro_offset[Y];
-      measurements.acc_raw[Z] -= this->_gyro_offset[Z];
-
-      return measurements;
-    }
-
-    AccelerometerResults CalculateAngels(AccelerometerMeasurements measurements) {
-      struct AccelerometerResults results;
-
-      // Calculate acceleration angles
-
-      // Calculated angles from accelerometer's values [in degrees] in that order: X, Y, Z
-      float acc_angle[3] = {0, 0, 0};
-
-      // Calculate total 3D acceleration vector: √(X² + Y² + Z²)
-      results.acc_total_vector = sqrt(pow(measurements.acc_raw[X], 2) + pow(measurements.acc_raw[Y], 2) + pow(measurements.acc_raw[Z], 2));
-
-      // To prevent asin to produce a NaN, make sure the input value is within [-1;+1]
-      if (abs(measurements.acc_raw[X]) < results.acc_total_vector) {
-        acc_angle[X] = asin((float)measurements.acc_raw[Y] / results.acc_total_vector) * (180 / PI); // asin gives angle in radian. Convert to degree multiplying by 180/pi
-      }
-
-      if (abs(measurements.acc_raw[Y]) < results.acc_total_vector) {
-        acc_angle[Y] = asin((float)measurements.acc_raw[X] / results.acc_total_vector) * (180 / PI);
-      }
-
-      // Calculated angles from gyro's values in that order: X, Y, Z
-      float gyro_angle[3] = {0, 0, 0};
-
-      // Angle calculation using integration
-      results.gyro_angle[X] += (measurements.gyro_raw[X] / (FREQ * SSF_GYRO));
-      results.gyro_angle[Y] += (-measurements.gyro_raw[Y] / (FREQ * SSF_GYRO)); // Change sign to match the accelerometer's one (source: datasheet and randomly trying to fix it lol)
-
-      // Transfer roll to pitch if IMU has yawed (it rotated)
-      results.gyro_angle[Y] += gyro_angle[X] * sin(measurements.gyro_raw[Z] * (PI / (FREQ * SSF_GYRO * 180)));
-      results.gyro_angle[X] -= gyro_angle[Y] * sin(measurements.gyro_raw[Z] * (PI / (FREQ * SSF_GYRO * 180)));
-
-      if (this->_has_init_values) {
-        // Correct the drift of the gyro with the accelerometer
-        gyro_angle[X] = gyro_angle[X] * 0.9995 + acc_angle[X] * 0.0005;
-        gyro_angle[Y] = gyro_angle[Y] * 0.9995 + acc_angle[Y] * 0.0005;
-      } else {
-        this->_has_init_values = true;
-
-        // Reset gyro's angles with accelerometer's angles.
-        results.gyro_angle[X] = acc_angle[X];
-        results.gyro_angle[Y] = acc_angle[Y];
-      }
-
-      // To dampen the pitch and roll angles a complementary filter is used
-      results.measures[ROLL]  = _last_results.measures[ROLL]  * 0.9 + gyro_angle[X] * 0.1;
-      results.measures[PITCH] = _last_results.measures[PITCH] * 0.9 + gyro_angle[Y] * 0.1;
-      results.measures[YAW]   = -measurements.gyro_raw[Z] / SSF_GYRO; // Store the angular motion for this axis
-
-      return results;
-    }
-
-
-    AccelerometerResults GetSensorResults() {
-      _last_results = this->CalculateAngels(this->NormalizeRawData(this->ReadRawData()));
-
-      Serial.print("[DEBUG] [AccelerationController] X: ");
-      Serial.print(_last_results.acc_raw[X]);
-
-      Serial.print(" Y: ");
-      Serial.print(_last_results.acc_raw[Y]);
-
-      Serial.print(" Z: ");
-      Serial.println(_last_results.acc_raw[Z]);
-
-      Serial.print("[DEBUG] [AccelerationController] ");
-      Serial.println(_last_results.acc_total_vector);
-
-      return _last_results;
     }
 };
 
@@ -393,7 +292,7 @@ class FlightController
       return this->_init_successful;
     }
 
-    virtual void UpdateState(RawValueSet raw_state, AccelerometerResults acc_results) {
+    virtual void UpdateState(RawValueSet raw_state/*, AccelerometerResults acc_results*/) {
       this->_relative_thrust = this->getRelativeThrust(raw_state.thrust);
       this->_relative_movement_f_b = this->getRelativeMovementForwardBackward(raw_state.movement_f_b);
       this->_relative_movement_l_r = this->getRelativeMovementLeftRight(raw_state.movement_l_r);
@@ -585,10 +484,8 @@ class Main {
 
       this->_remote_control_manager->Update();
 
-      this->_flight_controller->UpdateState(this->_remote_control_manager->GetValues(), this->_acceleration_controller->GetSensorResults());
+      this->_flight_controller->UpdateState(this->_remote_control_manager->GetValues()/*, this->_acceleration_controller->GetSensorResults()*/);
 
-      // TODO: Debug
-      return;
       this->_flight_controller->Commit();
 
       // tick_duration is lower than ROUGH_TICK_TIME now, thus recalculate it
@@ -667,6 +564,7 @@ void setup() {
 
   // Connect to a (potential) computer for outputting debug information on baud 9600
   Serial.begin(9600);
+  while (!Serial);
 
   // Init PowerManager and execute an immediate scan whether we are alright to fly
   // in the sky!
