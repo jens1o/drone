@@ -10,6 +10,7 @@
 
 // #define CLEANUP_BATTERY_CHECK
 #define CLEANUP_BATTERY_CHECK_PORT A0
+#define CLEANUP_BATTERY_CHECK_INTERVAL (10 * 1000)
 
 #define PERCENT_TOP 100
 #define PERCENT_LOW 0
@@ -44,11 +45,11 @@
 #define ROTOR_2_MAX_STRENGTH 2806
 #define ROTOR_2_DIRECTION LEFT
 
-#define ROTOR_3_MIN_STRENGTH 900 // (60)
-#define ROTOR_3_MAX_STRENGTH 2756
+#define ROTOR_3_MIN_STRENGTH 1000 // (60)
+#define ROTOR_3_MAX_STRENGTH 2856
 #define ROTOR_3_DIRECTION RIGHT
 
-#define ROTOR_4_MIN_STRENGTH 860 // (60)
+#define ROTOR_4_MIN_STRENGTH 1000 // (60)
 #define ROTOR_4_MAX_STRENGTH 2716
 #define ROTOR_4_DIRECTION LEFT
 
@@ -126,7 +127,7 @@ volatile bool __acc_controller_has_new_data = false;
 class AccelerationController
 {
   private:
-    MPU6050 _mpu = new MPU6050(MPU_ADDRESS);
+    MPU6050 _mpu;
     AccelerometerResults _last_results;
     bool _init_successful = true;
     // holds received interrupt status byte
@@ -149,6 +150,8 @@ class AccelerationController
       Wire.setClock(400000);
 
       this->_mpu.initialize();
+      
+      pinMode(GYRO_INTERRUPT_PIN, INPUT);
 
       // Test connection to verify it can work
       if (!this->_mpu.testConnection()) {
@@ -157,21 +160,25 @@ class AccelerationController
         return;
       }
 
-      pinMode(GYRO_INTERRUPT_PIN, INPUT);
+      delay(200);
+
       uint8_t deviceStatus = this->_mpu.dmpInitialize();
-      if (deviceStatus != 0) {
-        _init_successful = false;
-        Serial.println("[WARNING] [AccelerationController] Non-zero error code when initalizing MPU!");
-        return;
-      }
 
       // calibrated using a compass and try and error
       this->_mpu.setXGyroOffset(220);
       this->_mpu.setYGyroOffset(76);
       this->_mpu.setZGyroOffset(-85);
       this->_mpu.setZAccelOffset(1788);
+      
+      if (deviceStatus != 0) {
+        _init_successful = false;
+        Serial.println("[WARNING] [AccelerationController] Non-zero error code when initalizing MPU!");
+        return;
+      }
 
       this->_mpu.setDMPEnabled(true);
+
+      digitalPinToInterrupt(GYRO_INTERRUPT_PIN);
 
       // initalize interrupt for receiving continuous data
       attachInterrupt(digitalPinToInterrupt(GYRO_INTERRUPT_PIN), _hasDataReadyCallback, RISING);
@@ -193,8 +200,25 @@ class AccelerationController
       // I miss you, exceptions.
       if (!this->initSuccessful()) return;
 
-      // while (!__acc_controller_has_new_data &&
-
+      // wait for MPU interrupt or extra packet(s) available
+    while (!__acc_controller_has_new_data && fifoCount < packetSize) {
+        if (__acc_controller_has_new_data && fifoCount < packetSize) {
+          // try to get out of the infinite loop 
+          fifoCount = mpu.getFIFOCount();
+        }  
+        // other program behavior stuff here
+        // .
+        // .
+        // .
+        // if you are really paranoid you can frequently test in between other
+        // stuff to see if mpuInterrupt is true, and if so, "break;" from the
+        // while() loop to immediately process the MPU data
+        // .
+        // .
+        // .
+    }
+    // reset to ready
+    __acc_controller_has_new_data = false;
     }
 };
 
@@ -355,8 +379,8 @@ class PowerManager
     // (avoiding a persistent leak of time)
     virtual void MaybeUpdateCache()
     {
-      // check whether the last read was (at least) 15 seconds ago
-      bool shouldUpdateCache = ((millis() - this->last_battery_check_) >= 15 * 1000);
+      // check whether the last read was (at least) CLEANUP_BATTERY_CHECK_INTERVAL seconds ago
+      bool shouldUpdateCache = ((millis() - this->last_battery_check_) >= CLEANUP_BATTERY_CHECK_INTERVAL);
 
       if (shouldUpdateCache) {
         // update cache by reading the value and save it
@@ -593,7 +617,7 @@ void setup() {
 
   _main = new Main(flight_controller, power_mgr, rc_manager, acc_manager);
 
-  Serial.print("Successfully booted up. Startup took ");
+  Serial.print("Finish boot process.. Startup took ");
   Serial.print(millis() - start_time);
   Serial.println("ms");
 
