@@ -150,7 +150,7 @@ class AccelerationController
       Wire.setClock(400000);
 
       this->_mpu.initialize();
-      
+
       pinMode(GYRO_INTERRUPT_PIN, INPUT);
 
       // Test connection to verify it can work
@@ -169,7 +169,7 @@ class AccelerationController
       this->_mpu.setYGyroOffset(76);
       this->_mpu.setZGyroOffset(-85);
       this->_mpu.setZAccelOffset(1788);
-      
+
       if (deviceStatus != 0) {
         _init_successful = false;
         Serial.println("[WARNING] [AccelerationController] Non-zero error code when initalizing MPU!");
@@ -201,11 +201,11 @@ class AccelerationController
       if (!this->initSuccessful()) return;
 
       // wait for MPU interrupt or extra packet(s) available
-    while (!__acc_controller_has_new_data && fifoCount < packetSize) {
+      while (!__acc_controller_has_new_data && fifoCount < packetSize) {
         if (__acc_controller_has_new_data && fifoCount < packetSize) {
-          // try to get out of the infinite loop 
+          // try to get out of the infinite loop
           fifoCount = mpu.getFIFOCount();
-        }  
+        }
         // other program behavior stuff here
         // .
         // .
@@ -216,9 +216,9 @@ class AccelerationController
         // .
         // .
         // .
-    }
-    // reset to ready
-    __acc_controller_has_new_data = false;
+      }
+      // reset to ready
+      __acc_controller_has_new_data = false;
     }
 };
 
