@@ -131,8 +131,8 @@ class AccelerationController
     // count of all bytes currently in FIFO buffer
     uint16_t _fifoBufferLength;
     // FIFO storage buffer
-    // "64 bits ought be enough for everybody"
-    uint8_t _fifoBuffer[64];
+    // "128 bits ought be enough for everybody"
+    uint8_t _fifoBuffer[128];
     uint8_t _mpuInterruptPacketSize;
 
     static void _hasDataReadyCallback() {
