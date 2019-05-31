@@ -17,7 +17,7 @@
 // MUST NOT be too less, otherwise we will get weird values
 #define PULSE_IN_TIMEOUT 25000
 // time a tick should roughly take.
-#define ROUGH_TICK_TIME 1000 // 225
+#define ROUGH_TICK_TIME 225 // 225
 
 // It is important that this port is not connected to anything at all!
 #define RANDOM_SEED_PORT 15
@@ -37,19 +37,19 @@
 
 // The delta between the *_MIN_STRENGTH and *_MAX_STRENGTH should be 1856(as given by the Servo doc).
 
-#define ROTOR_1_MIN_STRENGTH 1000 // (60)
-#define ROTOR_1_MAX_STRENGTH 2950
+#define ROTOR_1_MIN_STRENGTH 995 // (60)
+#define ROTOR_1_MAX_STRENGTH 2945
 #define ROTOR_1_DIRECTION RIGHT
 
-#define ROTOR_2_MIN_STRENGTH 950 // (60)
-#define ROTOR_2_MAX_STRENGTH 2806
+#define ROTOR_2_MIN_STRENGTH 1025 // (60)
+#define ROTOR_2_MAX_STRENGTH 3075
 #define ROTOR_2_DIRECTION LEFT
 
-#define ROTOR_3_MIN_STRENGTH 1000 // (60)
+#define ROTOR_3_MIN_STRENGTH 995 // (60)
 #define ROTOR_3_MAX_STRENGTH 2856
 #define ROTOR_3_DIRECTION RIGHT
 
-#define ROTOR_4_MIN_STRENGTH 1000 // (60)
+#define ROTOR_4_MIN_STRENGTH 975 // (60)
 #define ROTOR_4_MAX_STRENGTH 2716
 #define ROTOR_4_DIRECTION LEFT
 
@@ -201,11 +201,11 @@ class AccelerationController
       if (!this->initSuccessful()) return;
 
       // wait for MPU interrupt or extra packet(s) available
-      while (!__acc_controller_has_new_data && fifoCount < packetSize) {
-        if (__acc_controller_has_new_data && fifoCount < packetSize) {
+      //while (!__acc_controller_has_new_data && fifoCount < packetSize) {
+        //if (__acc_controller_has_new_data && fifoCount < packetSize) {
           // try to get out of the infinite loop
-          fifoCount = mpu.getFIFOCount();
-        }
+          //fifoCount = mpu.getFIFOCount();
+        //}
         // other program behavior stuff here
         // .
         // .
@@ -216,9 +216,9 @@ class AccelerationController
         // .
         // .
         // .
-      }
+      //}
       // reset to ready
-      __acc_controller_has_new_data = false;
+     //__acc_controller_has_new_data = false;
     }
 };
 
@@ -407,7 +407,7 @@ class PowerManager
       // Any change here could damage the battery irrevocable and lead to fire.
       // By no means ignore this, Jens. Play safe. Be safe.
       // The value MUST include a safety buffer, just to play safe.
-      if (voltageValue <= 6.80) {
+      if (voltageValue <= 7.40) {
         Serial.print("[EMERGENCY] [PowerManager] Power supply is too low, set to ");
         Serial.print(voltageValue);
         Serial.println("V");
@@ -587,7 +587,7 @@ void setup() {
   randomSeed(analogRead(RANDOM_SEED_PORT));
 
   // Connect to a (potential) computer for outputting debug information on baud 9600
-  Serial.begin(9600);
+  Serial.begin(1e6);
   while (!Serial);
 
   // Init PowerManager and execute an immediate scan whether we are alright to fly
