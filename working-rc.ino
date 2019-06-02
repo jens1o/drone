@@ -210,7 +210,8 @@ public:
   void Tick()
   {
     // I miss you, exceptions.
-    // use variable directly over the `initSuccessful`-function because the compiler apparently isn't able to do inlining |>_<|
+    // use variable directly over the `initSuccessful`-function because the compiler apparently
+    // isn't able to do inlining |>_<|
     if (!this->_init_successful)
       return;
 
@@ -398,8 +399,8 @@ public:
         !servo3.attached() ||
         !servo4.attached())
     {
-      Serial.println(
-          "[EMERGENCY] [FlightController] At least one servo is not attached yet, but FlightController expects attached ones!");
+      Serial.print("[EMERGENCY] [FlightController] At least one servo is not attached yet");
+      Serial.println(", but FlightController expects attached ones!");
       this->_init_successful = false;
       return;
     }
@@ -478,15 +479,25 @@ public:
     this->_previous_error[ROLL] = errors[ROLL];
 
     // PID = e*Kp + ∫e*Ki + Δe*Kd
-    yaw_pid = (errors[YAW] * this->_Kp[YAW]) + (this->_error_sum[YAW] * this->_Ki[YAW]) + (delta_err[YAW] * this->_Kd[YAW]);
-    pitch_pid = (errors[PITCH] * this->_Kp[PITCH]) + (this->_error_sum[PITCH] * this->_Ki[PITCH]) + (delta_err[PITCH] * this->_Kd[PITCH]);
-    roll_pid = (errors[ROLL] * this->_Kp[ROLL]) + (this->_error_sum[ROLL] * this->_Ki[ROLL]) + (delta_err[ROLL] * this->_Kd[ROLL]);
+    yaw_pid = (errors[YAW] * this->_Kp[YAW]) +
+              (this->_error_sum[YAW] * this->_Ki[YAW]) +
+              (delta_err[YAW] * this->_Kd[YAW]);
+    pitch_pid = (errors[PITCH] * this->_Kp[PITCH]) +
+                (this->_error_sum[PITCH] * this->_Ki[PITCH]) +
+                (delta_err[PITCH] * this->_Kd[PITCH]);
+    roll_pid = (errors[ROLL] * this->_Kp[ROLL]) +
+               (this->_error_sum[ROLL] * this->_Ki[ROLL]) +
+               (delta_err[ROLL] * this->_Kd[ROLL]);
 
     // Calculate pulse duration for each ESC
-    this->_servo_1.write(minMax(this->_relative_thrust + roll_pid + pitch_pid - yaw_pid, ROTOR_1_MIN_STRENGTH, ROTOR_1_MAX_STRENGTH));
-    this->_servo_2.write(minMax(this->_relative_thrust - roll_pid + pitch_pid + yaw_pid, ROTOR_2_MIN_STRENGTH, ROTOR_2_MAX_STRENGTH));
-    this->_servo_3.write(minMax(this->_relative_thrust + roll_pid - pitch_pid + yaw_pid, ROTOR_3_MIN_STRENGTH, ROTOR_3_MAX_STRENGTH));
-    this->_servo_4.write(minMax(this->_relative_thrust - roll_pid - pitch_pid - yaw_pid, ROTOR_4_MIN_STRENGTH, ROTOR_4_MAX_STRENGTH));
+    this->_servo_1.write(
+        minMax(this->_relative_thrust + roll_pid + pitch_pid - yaw_pid, ROTOR_1_MIN_STRENGTH, ROTOR_1_MAX_STRENGTH));
+    this->_servo_2.write(
+        minMax(this->_relative_thrust - roll_pid + pitch_pid + yaw_pid, ROTOR_2_MIN_STRENGTH, ROTOR_2_MAX_STRENGTH));
+    this->_servo_3.write(
+        minMax(this->_relative_thrust + roll_pid - pitch_pid + yaw_pid, ROTOR_3_MIN_STRENGTH, ROTOR_3_MAX_STRENGTH));
+    this->_servo_4.write(
+        minMax(this->_relative_thrust - roll_pid - pitch_pid - yaw_pid, ROTOR_4_MIN_STRENGTH, ROTOR_4_MAX_STRENGTH));
   }
 
   //Make sure that given value is not over min_value/max_value range.
@@ -654,7 +665,8 @@ public:
   {
     if (_program_state == ProgramState::STOPPED)
     {
-      Serial.println("[EMERGENCY] [Main] An element set the program state to STOPPED for an unknown reason before the Main class took control!");
+      Serial.print("[EMERGENCY] [Main] An element set the program state to STOPPED for an unknown reason");
+      Serial.println(" before the Main class took control!");
       return;
     }
 
@@ -688,7 +700,8 @@ public:
 
     this->_remote_control_manager->Tick();
 
-    this->_flight_controller->UpdateState(this->_remote_control_manager->GetValues(), this->_acceleration_controller->GetResults());
+    this->_flight_controller->UpdateState(
+        this->_remote_control_manager->GetValues(), this->_acceleration_controller->GetResults());
 
     this->_flight_controller->Commit();
 
