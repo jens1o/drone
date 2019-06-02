@@ -112,10 +112,12 @@ int const OUTPUT_PORTS[] = {ROTOR_1_PORT, ROTOR_2_PORT, ROTOR_3_PORT, ROTOR_4_PO
 Servo rotor_1, rotor_2, rotor_3, rotor_4;
 
 const int MPU_ADDRESS = 0x68; // I2C address of the MPU-6050
-// DO NOT USE this variable outside of AccelerationController, it must be placed in the global scope as the Arduino programming language(Processing) is
-// unable to process static class variables …
-// do not leave out the `volatile`, as it is needed here(although heavily decreasing the abilities of the
-// optimizer)
+
+// DO NOT USE this variable outside of AccelerationController,
+// it must be placed in the global scope as the Arduino programming language(Processing) is
+// unable to process static class variables … <.>
+// Do not leave out the `volatile`, as it is needed here(although heavily decreasing the
+// abilities of the optimizer)!
 volatile bool __acc_controller_has_new_data = false;
 
 // Responsible for reading and calculating (useful) data from the MPU-6050
@@ -396,7 +398,8 @@ public:
         !servo3.attached() ||
         !servo4.attached())
     {
-      Serial.println("[EMERGENCY] [FlightController] At least one servo is not attached yet, but FlightController expects attached ones!");
+      Serial.println(
+          "[EMERGENCY] [FlightController] At least one servo is not attached yet, but FlightController expects attached ones!");
       this->_init_successful = false;
       return;
     }
@@ -643,7 +646,11 @@ private:
   AccelerationController *_acceleration_controller;
 
 public:
-  Main(FlightController *flight_controller, PowerManager *power_manager, RemoteControlManager *_remote_control_manager, AccelerationController *_acceleration_controller)
+  Main(
+      FlightController *flight_controller,
+      PowerManager *power_manager,
+      RemoteControlManager *_remote_control_manager,
+      AccelerationController *_acceleration_controller)
   {
     if (_program_state == ProgramState::STOPPED)
     {
@@ -832,11 +839,13 @@ void logValue(unsigned long value, String name, unsigned long rawValue)
 }
 
 // Returns how long the arduino is running in milliseconds, useful for debug purposes.
-unsigned long getRuntime()
+unsigned long getRanTime()
 {
   return millis() - start_time;
 }
 
+// Called by the arduino bootloader after calling setup() over and over again, so
+// useful for us to implement ticks
 void loop()
 {
   _main->Tick();
