@@ -129,7 +129,7 @@ private:
   uint8_t _mpuInterruptStatus;
   // count of all bytes currently in FIFO buffer
   uint16_t _fifoBufferLength;
-  // FIFO storage buffer
+  // FIFO storage buffer that is being filled as soon as data is received after an interrupt from the MPU-6050
   // "128 bits ought be enough for everybody"
   uint8_t _fifoBuffer[128];
   uint8_t _mpuInterruptPacketSize;
@@ -140,6 +140,7 @@ private:
   }
 
 public:
+  // Initalizes the gyro to retrieve data from it in the future
   AccelerationController(void)
   {
     unsigned long initStartTime = millis();
@@ -149,6 +150,7 @@ public:
     // set I2C clock to 400 kHz
     Wire.setClock(400000);
 
+    // Order the MPU(-library) to initalize itself
     this->_mpu.initialize();
 
     // first initalize the mpu, then init the pin on the board
@@ -162,17 +164,12 @@ public:
       return;
     }
 
-    // let the MPU initalize
+    // HACK: Wait until the MPU is initalized
     delay(200);
 
     uint8_t deviceStatus = this->_mpu.dmpInitialize();
 
-    // calibrated using a compass and try and error
-    this->_mpu.setXGyroOffset(220);
-    this->_mpu.setYGyroOffset(76);
-    this->_mpu.setZGyroOffset(-85);
-    this->_mpu.setZAccelOffset(1788);
-
+    // check for errors
     if (deviceStatus != 0)
     {
       this->_init_successful = false;
@@ -180,9 +177,13 @@ public:
       return;
     }
 
-    this->_mpu.setDMPEnabled(true);
+    // calibrated using a compass and try and error
+    this->_mpu.setXGyroOffset(220);
+    this->_mpu.setYGyroOffset(76);
+    this->_mpu.setZGyroOffset(-85);
+    this->_mpu.setZAccelOffset(1788);
 
-    digitalPinToInterrupt(GYRO_INTERRUPT_PIN);
+    this->_mpu.setDMPEnabled(true);
 
     // initalize interrupt for receiving continuous data
     attachInterrupt(digitalPinToInterrupt(GYRO_INTERRUPT_PIN), _hasDataReadyCallback, RISING);
@@ -196,21 +197,20 @@ public:
     Serial.println("ms");
   }
 
+  // Returns true iff(if and only if) the intialization process was succesful
   bool initSuccessful()
   {
     return this->_init_successful;
   }
 
+  // Blocking until it receives updated data from the gyro to make sure
+  // that there is always relevant (current) data
   void Tick()
   {
     // I miss you, exceptions.
     // use variable directly over the `initSuccessful`-function because the compiler apparently isn't able to do inlining |>_<|
     if (!this->_init_successful)
       return;
-
-    //Quaternion q;           // [w, x, y, z]         quaternion container
-    //float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
-    //VectorFloat gravity;    // [x, y, z]            gravity vector
 
     // wait for MPU interrupt or extra packet(s) available
     while (!__acc_controller_has_new_data && this->_fifoBufferLength < this->_mpuInterruptPacketSize)
@@ -222,7 +222,7 @@ public:
       }
       // continue
     }
-    // reset to ready
+    // reset to ready for further signals
     __acc_controller_has_new_data = false;
 
     this->_mpuInterruptStatus = this->_mpu.getIntStatus();
@@ -236,70 +236,76 @@ public:
       this->_mpu.resetFIFO();
       this->_fifoBufferLength = this->_mpu.getFIFOCount();
       Serial.println("[WARNING] [AccelerationController] FIFO overflow!");
-
-      // otherwise, check for DMP data ready interrupt (this should happen frequently)
+      return;
     }
-    else if (this->_mpuInterruptStatus & _BV(MPU6050_INTERRUPT_DMP_INT_BIT))
+    // otherwise, check for DMP data ready interrupt (this should happen frequently)
+
+    if (!(this->_mpuInterruptStatus & _BV(MPU6050_INTERRUPT_DMP_INT_BIT))
     {
+      return;
+    } 
       // wait for correct available data length, should be a VERY short wait
-      while (this->_fifoBufferLength < this->_mpuInterruptPacketSize)
-        this->_fifoBufferLength = this->_mpu.getFIFOCount();
-
-      // read a packet from FIFO
-      this->_mpu.getFIFOBytes(this->_fifoBuffer, this->_mpuInterruptPacketSize);
-
-      // track FIFO count here in case there is > 1 packet available
-      // (this lets us immediately read more without waiting for an interrupt)
-      this->_fifoBufferLength -= this->_mpuInterruptPacketSize;
-
-      struct AccelerometerResults results;
-
-      this->_mpu.dmpGetAccel(&results.acc_angle, this->_fifoBuffer);
-
-      Serial.print("ACC angles:\tX:\t");
-      Serial.print(results.acc_angle.x);
-      Serial.print("\tY:\t");
-      Serial.print(results.acc_angle.y);
-      Serial.print("\tZ:\t");
-      Serial.println(results.acc_angle.z);
-
-      int16_t gyro[3];
-
-      this->_mpu.dmpGetGyro(gyro, this->_fifoBuffer);
-
-      Serial.print("Gyro angles:\tX:\t");
-      Serial.print(gyro[X]);
-      Serial.print("\tY:\t");
-      Serial.print(gyro[Y]);
-      Serial.print("\tZ:\t");
-      Serial.println(gyro[Z]);
-
-      // Calculated angles from gyro's values in that order: X, Y, Z
-      int32_t gyro_angle[3];
-
-      gyro_angle[X] = gyro[X];
-      gyro_angle[Y] = gyro[Y];
-      gyro_angle[Z] = -gyro[Z] / SSF_GYRO;
-
-      // Angle calculation using integration
-      gyro_angle[X] += (gyro[X] / (FREQ * SSF_GYRO));
-      gyro_angle[Y] += (-gyro[Y] / (FREQ * SSF_GYRO)); // Change sign to match the accelerometer's one
-
-      // Transfer roll to pitch if it has yawed
-      results.measures[Y] += gyro[X] * sin(gyro[Z] * (PI / (FREQ * SSF_GYRO * 180)));
-      results.measures[X] -= gyro_angle[Y] * sin(gyro[Z] * (PI / (FREQ * SSF_GYRO * 180)));
-      results.measures[Z] = gyro_angle[Z]; // Store the angular motion for this axis
-
-      this->_last_results = results;
+    while (this->_fifoBufferLength < this->_mpuInterruptPacketSize) {
+      this->_fifoBufferLength = this->_mpu.getFIFOCount();
     }
+
+    // read a packet from FIFO
+    this->_mpu.getFIFOBytes(this->_fifoBuffer, this->_mpuInterruptPacketSize);
+
+    // track FIFO count here in case there is > 1 packet available
+    // (this lets us immediately read more without waiting for an interrupt) -> performance win!
+    this->_fifoBufferLength -= this->_mpuInterruptPacketSize;
+
+    struct AccelerometerResults results;
+
+    this->_mpu.dmpGetAccel(&results.acc_angle, this->_fifoBuffer);
+
+    Serial.print("ACC angles:\tX:\t");
+    Serial.print(results.acc_angle.x);
+    Serial.print("\tY:\t");
+    Serial.print(results.acc_angle.y);
+    Serial.print("\tZ:\t");
+    Serial.println(results.acc_angle.z);
+
+    // get gyro data
+    int16_t gyro[3];
+
+    this->_mpu.dmpGetGyro(gyro, this->_fifoBuffer);
+
+    Serial.print("Gyro angles:\tX:\t");
+    Serial.print(gyro[X]);
+    Serial.print("\tY:\t");
+    Serial.print(gyro[Y]);
+    Serial.print("\tZ:\t");
+    Serial.println(gyro[Z]);
+
+    // Calculated angles from gyro's values in that order: X, Y, Z
+    int32_t gyro_angle[3];
+
+    gyro_angle[X] = gyro[X];
+    gyro_angle[Y] = gyro[Y];
+    gyro_angle[Z] = -gyro[Z] / SSF_GYRO;
+
+    // Angle calculation using integration
+    gyro_angle[X] += (gyro[X] / (FREQ * SSF_GYRO));
+    gyro_angle[Y] += (-gyro[Y] / (FREQ * SSF_GYRO)); // Change sign to match the accelerometer's one
+
+    // Transfer roll to pitch if it has yawed
+    results.measures[Y] += gyro[X] * sin(gyro[Z] * (PI / (FREQ * SSF_GYRO * 180)));
+    results.measures[X] -= gyro_angle[Y] * sin(gyro[Z] * (PI / (FREQ * SSF_GYRO * 180)));
+    results.measures[Z] = gyro_angle[Z]; // Store the angular motion for this axis
+
+    this->_last_results = results;
   }
 
+  // returns the last results that have been processed successfully
   AccelerometerResults GetResults()
   {
     return this->_last_results;
   }
 };
 
+// Responsible for deciding how strong the rotors should be rotating
 class FlightController
 {
 private:
@@ -327,12 +333,12 @@ private:
   AccelerometerResults _acc_results;
 
   // Snaps and return the value of 50 if it is inside a range
-  // that is considered to ease behavior (rounding _errors, minor differences
+  // that is considered to ease behavior (rounding errors, minor differences
   // from remote control and known range).
   // Otherwise returns given value.
   virtual int maybeSnapNeutral(int value)
   {
-    // mark everything 45..=54 as 50
+    // mark everything [45; 54] as 50
     if (value >= 45 && value <= 54)
     {
       return 50;
@@ -426,6 +432,7 @@ public:
     this->_acc_results = acc_results;
   }
 
+  // Shuts down by telling the rotors to stop immediately
   virtual void Shutdown()
   {
     this->_servo_1.write(0);
@@ -479,14 +486,7 @@ public:
     this->_servo_4.write(minMax(this->_relative_thrust - roll_pid - pitch_pid - yaw_pid, ROTOR_4_MIN_STRENGTH, ROTOR_4_MAX_STRENGTH));
   }
 
-  /**
-       Make sure that given value is not over min_value/max_value range.
-
-       @param int value     : The value to convert
-       @param int min_value : The min value
-       @param int max_value : The max value
-       @return int
-    */
+  //Make sure that given value is not over min_value/max_value range.
   int minMax(int value, int min_value, int max_value)
   {
     if (value > max_value)
@@ -814,7 +814,7 @@ void setup()
 //  * a) the name this value stands for(the first character should be upper-cased),
 //  * b) the value itself and
 //  * c) the raw value (we fed our algorithms with)
-// so they are printed out on the Serial Monitor(if connected).
+// so they are printed out on the Serial Monitor(iff connected).
 void logValue(unsigned long value, String name, unsigned long rawValue)
 {
   Serial.print(name);
