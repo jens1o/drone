@@ -1,12 +1,12 @@
-#include <Servo.h>
-#include <Wire.h>
-#include <I2Cdev.h>
-#include <MPU6050_6Axis_MotionApps20.h>
-
 // Defines whether there is verbose logging on the Serial Monitor
 // commented out = production
 // not commented out = debug mode
 #define VERBOSE
+
+#include <Servo.h>
+#include <Wire.h>
+#include <I2Cdev.h>
+#include <MPU6050_6Axis_MotionApps20.h>
 
 // #define CLEANUP_BATTERY_CHECK
 #define CLEANUP_BATTERY_CHECK_PORT A0
@@ -17,7 +17,7 @@
 // MUST NOT be too less, otherwise we will get weird values
 #define PULSE_IN_TIMEOUT 25000
 // time a tick should roughly take.
-#define ROUGH_TICK_TIME 225 // 225
+#define ROUGH_TICK_TIME 350 // 225
 
 // It is important that this port is not connected to anything at all!
 #define RANDOM_SEED_PORT 15
@@ -35,27 +35,25 @@
 #define LEFT 0
 #define RIGHT 1
 
-// The delta between the *_MIN_STRENGTH and *_MAX_STRENGTH should be 1856(as given by the Servo doc).
-
-#define ROTOR_1_MIN_STRENGTH 995 // (60)
+#define ROTOR_1_MIN_STRENGTH 995
 #define ROTOR_1_MAX_STRENGTH 2945
 #define ROTOR_1_DIRECTION RIGHT
 
-#define ROTOR_2_MIN_STRENGTH 1025 // (60)
+#define ROTOR_2_MIN_STRENGTH 1025
 #define ROTOR_2_MAX_STRENGTH 3075
 #define ROTOR_2_DIRECTION LEFT
 
-#define ROTOR_3_MIN_STRENGTH 995 // (60)
+#define ROTOR_3_MIN_STRENGTH 995
 #define ROTOR_3_MAX_STRENGTH 2856
 #define ROTOR_3_DIRECTION RIGHT
 
-#define ROTOR_4_MIN_STRENGTH 975 // (60)
+#define ROTOR_4_MIN_STRENGTH 975
 #define ROTOR_4_MAX_STRENGTH 2716
 #define ROTOR_4_DIRECTION LEFT
 
 #define FREQ 250             // Sampling frequency
 #define SSF_GYRO 65.5        // Sensitivity Scale Factor of the gyrometer from the datasheet
-#define GYRO_INTERRUPT_PIN 2 // use pin 2 on Arduino Uno & most boards
+#define GYRO_INTERRUPT_PIN 2 // use pin 2 on Arduino Uno and Arduino Mega boards
 
 #define X 0 // X axis
 #define Y 1 // Y axis
@@ -86,7 +84,7 @@ struct AccelerometerResults
   // The RAW values got from accelerometer (in m/sec²) in that order: X, Y, Z
   int acc_raw[3] = {0, 0, 0};
   // Calculated angles from accelerometer's values in that order: X, Y, Z
-  float acc_angle[3] = {0, 0, 0};
+  VectorInt16 acc_angle;
   int temperature;
   /**
      Real measures on 3 axis calculated from gyro AND accelerometer in that order : Yaw, Pitch, Roll
@@ -95,8 +93,6 @@ struct AccelerometerResults
       - Nose right implies a positive yaw
   */
   float measures[3] = {0, 0, 0};
-  // Calculated angles from gyro's values in that order: X, Y, Z
-  float gyro_angle[3] = {0, 0, 0};
   // Total 3D acceleration vector in m/s²
   long acc_total_vector;
 };
@@ -116,10 +112,12 @@ int const OUTPUT_PORTS[] = {ROTOR_1_PORT, ROTOR_2_PORT, ROTOR_3_PORT, ROTOR_4_PO
 Servo rotor_1, rotor_2, rotor_3, rotor_4;
 
 const int MPU_ADDRESS = 0x68; // I2C address of the MPU-6050
-// DO NOT USE this variable outside of AccelerationController, it must be placed in the global scope as the Arduino programming language(Processing) is
-// unable to process static class variables …
-// do not leave out the `volatile`, as it is needed here(although heavily decreasing the abilities of the
-// optimizer)
+
+// DO NOT USE this variable outside of AccelerationController,
+// it must be placed in the global scope as the Arduino programming language(Processing) is
+// unable to process static class variables … <.>
+// Do not leave out the `volatile`, as it is needed here(although heavily decreasing the
+// abilities of the optimizer)!
 volatile bool __acc_controller_has_new_data = false;
 
 // Responsible for reading and calculating (useful) data from the MPU-6050
@@ -132,7 +130,10 @@ private:
   // holds received interrupt status byte
   uint8_t _mpuInterruptStatus;
   // count of all bytes currently in FIFO buffer
-  uint16_t _fifoCount;
+  uint16_t _fifoBufferLength;
+  // FIFO storage buffer that is being filled as soon as data is received after an interrupt from the MPU-6050
+  // "128 bits ought be enough for everybody"
+  uint8_t _fifoBuffer[128];
   uint8_t _mpuInterruptPacketSize;
 
   static void _hasDataReadyCallback()
@@ -141,6 +142,7 @@ private:
   }
 
 public:
+  // Initalizes the gyro to retrieve data from it in the future
   AccelerationController(void)
   {
     unsigned long initStartTime = millis();
@@ -150,8 +152,10 @@ public:
     // set I2C clock to 400 kHz
     Wire.setClock(400000);
 
+    // Order the MPU(-library) to initalize itself
     this->_mpu.initialize();
 
+    // first initalize the mpu, then init the pin on the board
     pinMode(GYRO_INTERRUPT_PIN, INPUT);
 
     // Test connection to verify it can work
@@ -162,9 +166,18 @@ public:
       return;
     }
 
+    // HACK: Wait until the MPU is initalized
     delay(200);
 
     uint8_t deviceStatus = this->_mpu.dmpInitialize();
+
+    // check for errors
+    if (deviceStatus != 0)
+    {
+      this->_init_successful = false;
+      Serial.println("[WARNING] [AccelerationController] Non-zero error code when initalizing MPU!");
+      return;
+    }
 
     // calibrated using a compass and try and error
     this->_mpu.setXGyroOffset(220);
@@ -172,16 +185,7 @@ public:
     this->_mpu.setZGyroOffset(-85);
     this->_mpu.setZAccelOffset(1788);
 
-    if (deviceStatus != 0)
-    {
-      _init_successful = false;
-      Serial.println("[WARNING] [AccelerationController] Non-zero error code when initalizing MPU!");
-      return;
-    }
-
     this->_mpu.setDMPEnabled(true);
-
-    digitalPinToInterrupt(GYRO_INTERRUPT_PIN);
 
     // initalize interrupt for receiving continuous data
     attachInterrupt(digitalPinToInterrupt(GYRO_INTERRUPT_PIN), _hasDataReadyCallback, RISING);
@@ -195,39 +199,116 @@ public:
     Serial.println("ms");
   }
 
+  // Returns true iff(if and only if) the intialization process was succesful
   bool initSuccessful()
   {
     return this->_init_successful;
   }
 
-  void loop()
+  // Blocking until it receives updated data from the gyro to make sure
+  // that there is always relevant (current) data
+  void Tick()
   {
     // I miss you, exceptions.
-    if (!this->initSuccessful())
+    // use variable directly over the `initSuccessful`-function because the compiler apparently
+    // isn't able to do inlining |>_<|
+    if (!this->_init_successful)
       return;
 
     // wait for MPU interrupt or extra packet(s) available
-    //while (!__acc_controller_has_new_data && fifoCount < packetSize) {
-    //if (__acc_controller_has_new_data && fifoCount < packetSize) {
-    // try to get out of the infinite loop
-    //fifoCount = mpu.getFIFOCount();
-    //}
-    // other program behavior stuff here
-    // .
-    // .
-    // .
-    // if you are really paranoid you can frequently test in between other
-    // stuff to see if mpuInterrupt is true, and if so, "break;" from the
-    // while() loop to immediately process the MPU data
-    // .
-    // .
-    // .
-    //}
-    // reset to ready
-    //__acc_controller_has_new_data = false;
+    while (!__acc_controller_has_new_data && this->_fifoBufferLength < this->_mpuInterruptPacketSize)
+    {
+      if (__acc_controller_has_new_data && this->_fifoBufferLength < this->_mpuInterruptPacketSize)
+      {
+        // try to get out of the infinite loop
+        this->_fifoBufferLength = this->_mpu.getFIFOCount();
+      }
+      // continue
+    }
+    // reset to ready for further signals
+    __acc_controller_has_new_data = false;
+
+    this->_mpuInterruptStatus = this->_mpu.getIntStatus();
+    // get current FIFO count
+    this->_fifoBufferLength = this->_mpu.getFIFOCount();
+
+    // check for overflow (this should never happen unless our code is too inefficient)
+    if ((this->_mpuInterruptStatus & _BV(MPU6050_INTERRUPT_FIFO_OFLOW_BIT)) || this->_fifoBufferLength >= 1024)
+    {
+      // reset so we can continue cleanly
+      this->_mpu.resetFIFO();
+      this->_fifoBufferLength = this->_mpu.getFIFOCount();
+      Serial.println("[WARNING] [AccelerationController] FIFO overflow!");
+      return;
+    }
+    // otherwise, check for DMP data ready interrupt (this should happen frequently)
+
+    if (!(this->_mpuInterruptStatus & _BV(MPU6050_INTERRUPT_DMP_INT_BIT))
+    {
+      return;
+    } 
+      // wait for correct available data length, should be a VERY short wait
+    while (this->_fifoBufferLength < this->_mpuInterruptPacketSize) {
+      this->_fifoBufferLength = this->_mpu.getFIFOCount();
+    }
+
+    // read a packet from FIFO
+    this->_mpu.getFIFOBytes(this->_fifoBuffer, this->_mpuInterruptPacketSize);
+
+    // track FIFO count here in case there is > 1 packet available
+    // (this lets us immediately read more without waiting for an interrupt) -> performance win!
+    this->_fifoBufferLength -= this->_mpuInterruptPacketSize;
+
+    struct AccelerometerResults results;
+
+    this->_mpu.dmpGetAccel(&results.acc_angle, this->_fifoBuffer);
+
+    Serial.print("ACC angles:\tX:\t");
+    Serial.print(results.acc_angle.x);
+    Serial.print("\tY:\t");
+    Serial.print(results.acc_angle.y);
+    Serial.print("\tZ:\t");
+    Serial.println(results.acc_angle.z);
+
+    // get gyro data
+    int16_t gyro[3];
+
+    this->_mpu.dmpGetGyro(gyro, this->_fifoBuffer);
+
+    Serial.print("Gyro angles:\tX:\t");
+    Serial.print(gyro[X]);
+    Serial.print("\tY:\t");
+    Serial.print(gyro[Y]);
+    Serial.print("\tZ:\t");
+    Serial.println(gyro[Z]);
+
+    // Calculated angles from gyro's values in that order: X, Y, Z
+    int32_t gyro_angle[3];
+
+    gyro_angle[X] = gyro[X];
+    gyro_angle[Y] = gyro[Y];
+    gyro_angle[Z] = -gyro[Z] / SSF_GYRO;
+
+    // Angle calculation using integration
+    gyro_angle[X] += (gyro[X] / (FREQ * SSF_GYRO));
+    gyro_angle[Y] += (-gyro[Y] / (FREQ * SSF_GYRO)); // Change sign to match the accelerometer's one
+
+    // Transfer roll to pitch if it has yawed
+    results.measures[Y] += gyro[X] * sin(gyro[Z] * (PI / (FREQ * SSF_GYRO * 180)));
+    results.measures[X] -= gyro_angle[Y] * sin(gyro[Z] * (PI / (FREQ * SSF_GYRO * 180)));
+    results.measures[Z] = gyro_angle[Z]; // Store the angular motion for this axis
+
+    this->_last_results = results;
+  }
+
+  // returns the last results that have been processed successfully
+  AccelerometerResults GetResults()
+  {
+    return this->_last_results;
   }
 };
 
+// Responsible for deciding how strong the rotors should be rotating
 class FlightController
 {
 private:
@@ -236,14 +317,23 @@ private:
   byte _relative_3 = 0;
   byte _relative_4 = 0;
   byte _relative_thrust = 0;
+  // PITCH
   byte _relative_movement_f_b = 0;
+  // ROLL
   byte _relative_movement_l_r = 0;
+  // YAW
   byte _relative_rotation_l_r = 0;
   bool _init_successful = true;
   Servo _servo_1;
   Servo _servo_2;
   Servo _servo_3;
   Servo _servo_4;
+  float _Kp[3] = {4.0, 1.3, 1.3};       // P coefficients in that order : Yaw, Pitch, Roll
+  float _Ki[3] = {0.02, 0.04, 0.04};    // I coefficients in that order : Yaw, Pitch, Roll
+  float _Kd[3] = {0, 18, 18};           // D coefficients in that order : Yaw, Pitch, Roll
+  float _error_sum[3] = {0, 0, 0};      // Error sums (used for integral component) : [Yaw, Pitch, Roll]
+  float _previous_error[3] = {0, 0, 0}; // Last errors (used for derivative component) : [Yaw, Pitch, Roll]
+  AccelerometerResults _acc_results;
 
   // Snaps and return the value of 50 if it is inside a range
   // that is considered to ease behavior (rounding errors, minor differences
@@ -251,7 +341,7 @@ private:
   // Otherwise returns given value.
   virtual int maybeSnapNeutral(int value)
   {
-    // mark everything 45..=54 as 50
+    // mark everything [45; 54] as 50
     if (value >= 45 && value <= 54)
     {
       return 50;
@@ -309,7 +399,8 @@ public:
         !servo3.attached() ||
         !servo4.attached())
     {
-      Serial.println("[EMERGENCY] [FlightController] At least one servo is not attached yet, but FlightController expects attached ones!");
+      Serial.print("[EMERGENCY] [FlightController] At least one servo is not attached yet");
+      Serial.println(", but FlightController expects attached ones!");
       this->_init_successful = false;
       return;
     }
@@ -319,6 +410,14 @@ public:
     this->_servo_3 = servo3;
     this->_servo_4 = servo4;
 
+    this->_error_sum[YAW] = 0;
+    this->_error_sum[PITCH] = 0;
+    this->_error_sum[ROLL] = 0;
+
+    this->_previous_error[YAW] = 0;
+    this->_previous_error[PITCH] = 0;
+    this->_previous_error[ROLL] = 0;
+
     Serial.println("[INFO] [FlightController] Initalized.");
   }
 
@@ -327,14 +426,17 @@ public:
     return this->_init_successful;
   }
 
-  virtual void UpdateState(RawValueSet raw_state /*, AccelerometerResults acc_results*/)
+  virtual void UpdateState(RawValueSet raw_state, AccelerometerResults acc_results)
   {
     this->_relative_thrust = this->getRelativeThrust(raw_state.thrust);
     this->_relative_movement_f_b = this->getRelativeMovementForwardBackward(raw_state.movement_f_b);
     this->_relative_movement_l_r = this->getRelativeMovementLeftRight(raw_state.movement_l_r);
     this->_relative_rotation_l_r = this->getRotationLeftRightInPercent(raw_state.rotation_l_r);
+
+    this->_acc_results = acc_results;
   }
 
+  // Shuts down by telling the rotors to stop immediately
   virtual void Shutdown()
   {
     this->_servo_1.write(0);
@@ -346,13 +448,71 @@ public:
   // Writes the respective data to all rotors
   virtual void Commit()
   {
-    // TODO
-    Serial.print("Writing data to rotors. Thrust: ");
-    Serial.println(this->_relative_thrust);
-    this->_servo_1.write(this->_relative_thrust);
-    this->_servo_2.write(this->_relative_thrust);
-    this->_servo_3.write(this->_relative_thrust);
-    this->_servo_4.write(this->_relative_thrust);
+    Serial.println("Committing data to rotors …");
+
+    float delta_err[3] = {0, 0, 0}; // Error deltas in that order   : Yaw, Pitch, Roll
+    float yaw_pid;
+    float pitch_pid;
+    float roll_pid;
+    // Measured errors (compared to instructions) : [Yaw, Pitch, Roll]
+    float errors[3];
+
+    // calculate errors (i.e. differences between instructions and measurements)
+    errors[YAW] = this->_relative_rotation_l_r - this->_acc_results.measures[YAW];
+    errors[PITCH] = this->_relative_movement_f_b - this->_acc_results.measures[PITCH];
+    errors[ROLL] = this->_relative_movement_l_r - this->_acc_results.measures[ROLL];
+
+    // PID calculation
+    // Calculate sum of _errors : Integral coefficients
+    this->_error_sum[YAW] += errors[YAW];
+    this->_error_sum[PITCH] += errors[PITCH];
+    this->_error_sum[ROLL] += errors[ROLL];
+
+    // Calculate error delta : Derivative coefficients
+    delta_err[YAW] = errors[YAW] - this->_previous_error[YAW];
+    delta_err[PITCH] = errors[PITCH] - this->_previous_error[PITCH];
+    delta_err[ROLL] = errors[ROLL] - this->_previous_error[ROLL];
+
+    // Save current error as previous_error for next time
+    this->_previous_error[YAW] = errors[YAW];
+    this->_previous_error[PITCH] = errors[PITCH];
+    this->_previous_error[ROLL] = errors[ROLL];
+
+    // PID = e*Kp + ∫e*Ki + Δe*Kd
+    yaw_pid = (errors[YAW] * this->_Kp[YAW]) +
+              (this->_error_sum[YAW] * this->_Ki[YAW]) +
+              (delta_err[YAW] * this->_Kd[YAW]);
+    pitch_pid = (errors[PITCH] * this->_Kp[PITCH]) +
+                (this->_error_sum[PITCH] * this->_Ki[PITCH]) +
+                (delta_err[PITCH] * this->_Kd[PITCH]);
+    roll_pid = (errors[ROLL] * this->_Kp[ROLL]) +
+               (this->_error_sum[ROLL] * this->_Ki[ROLL]) +
+               (delta_err[ROLL] * this->_Kd[ROLL]);
+
+    // Calculate pulse duration for each ESC
+    this->_servo_1.write(
+        minMax(this->_relative_thrust + roll_pid + pitch_pid - yaw_pid, ROTOR_1_MIN_STRENGTH, ROTOR_1_MAX_STRENGTH));
+    this->_servo_2.write(
+        minMax(this->_relative_thrust - roll_pid + pitch_pid + yaw_pid, ROTOR_2_MIN_STRENGTH, ROTOR_2_MAX_STRENGTH));
+    this->_servo_3.write(
+        minMax(this->_relative_thrust + roll_pid - pitch_pid + yaw_pid, ROTOR_3_MIN_STRENGTH, ROTOR_3_MAX_STRENGTH));
+    this->_servo_4.write(
+        minMax(this->_relative_thrust - roll_pid - pitch_pid - yaw_pid, ROTOR_4_MIN_STRENGTH, ROTOR_4_MAX_STRENGTH));
+  }
+
+  //Make sure that given value is not over min_value/max_value range.
+  int minMax(int value, int min_value, int max_value)
+  {
+    if (value > max_value)
+    {
+      value = max_value;
+    }
+    else if (value < min_value)
+    {
+      value = min_value;
+    }
+
+    return value;
   }
 };
 
@@ -365,7 +525,7 @@ private:
   unsigned long last_battery_check_ = 0;
 
 public:
-  // This gets called once this instance is created
+  // This gets called once this instance is created ("constructor")
   PowerManager(void)
   {
     // read voltage upon creation to avoid having an empty cache
@@ -447,8 +607,8 @@ private:
   }
 
 public:
-  // Reads the values
-  void Update()
+  // Reads the values from the remote control receiver
+  void Tick()
   {
     Serial.println("[INFO] [RemoteControlManager] Reading new values from Remote Control.");
 
@@ -468,8 +628,6 @@ public:
         channel4};
 
     // TODO: Log values
-    Serial.print("Thrust value: ");
-    Serial.println(values.thrust);
 
     this->_values = values;
   }
@@ -499,11 +657,16 @@ private:
   AccelerationController *_acceleration_controller;
 
 public:
-  Main(FlightController *flight_controller, PowerManager *power_manager, RemoteControlManager *_remote_control_manager, AccelerationController *_acceleration_controller)
+  Main(
+      FlightController *flight_controller,
+      PowerManager *power_manager,
+      RemoteControlManager *_remote_control_manager,
+      AccelerationController *_acceleration_controller)
   {
     if (_program_state == ProgramState::STOPPED)
     {
-      Serial.println("[EMERGENCY] [Main] An element set the program state to STOPPED for an unknown reason before the Main class took control!");
+      Serial.print("[EMERGENCY] [Main] An element set the program state to STOPPED for an unknown reason");
+      Serial.println(" before the Main class took control!");
       return;
     }
 
@@ -511,6 +674,8 @@ public:
     this->_power_manager = power_manager;
     this->_remote_control_manager = _remote_control_manager;
     this->_acceleration_controller = _acceleration_controller;
+
+    _program_state = ProgramState::STARTED;
   }
 
   void Tick()
@@ -531,9 +696,12 @@ public:
 #endif
     }
 
-    this->_remote_control_manager->Update();
+    this->_acceleration_controller->Tick();
 
-    this->_flight_controller->UpdateState(this->_remote_control_manager->GetValues() /*, this->_acceleration_controller->GetSensorResults()*/);
+    this->_remote_control_manager->Tick();
+
+    this->_flight_controller->UpdateState(
+        this->_remote_control_manager->GetValues(), this->_acceleration_controller->GetResults());
 
     this->_flight_controller->Commit();
 
@@ -621,6 +789,10 @@ void setup()
   while (!Serial)
     ;
 
+  Serial.print("[INFO] [setup()] Program starting … Start time was ");
+  Serial.print(start_time);
+  Serial.println("ms");
+
   // Init PowerManager and execute an immediate scan whether we are alright to fly
   // in the sky!
   PowerManager *power_mgr = new PowerManager();
@@ -650,7 +822,7 @@ void setup()
 
   _main = new Main(flight_controller, power_mgr, rc_manager, acc_manager);
 
-  Serial.print("Finish boot process.. Startup took ");
+  Serial.print("Finished boot process. Startup took ");
   Serial.print(millis() - start_time);
   Serial.println("ms");
 
@@ -662,7 +834,7 @@ void setup()
 //  * a) the name this value stands for(the first character should be upper-cased),
 //  * b) the value itself and
 //  * c) the raw value (we fed our algorithms with)
-// so they are printed out on the Serial Monitor(if connected).
+// so they are printed out on the Serial Monitor(iff connected).
 void logValue(unsigned long value, String name, unsigned long rawValue)
 {
   Serial.print(name);
@@ -679,6 +851,14 @@ void logValue(unsigned long value, String name, unsigned long rawValue)
 #endif // VERBOSE
 }
 
+// Returns how long the arduino is running in milliseconds, useful for debug purposes.
+unsigned long getRanTime()
+{
+  return millis() - start_time;
+}
+
+// Called by the arduino bootloader after calling setup() over and over again, so
+// useful for us to implement ticks
 void loop()
 {
   _main->Tick();
